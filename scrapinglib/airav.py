@@ -5,6 +5,7 @@ import re
 from .parser import Parser
 from .javbus import Javbus
 
+
 class Airav(Parser):
     source = 'airav'
 
@@ -21,14 +22,14 @@ class Airav(Parser):
     def extraInit(self):
         # for javbus
         self.specifiedSource = None
-        self.addtion_Javbus = False
+        self.addtion_Javbus = True
 
     def search(self, number):
         self.number = number
         if self.specifiedUrl:
             self.detailurl = self.specifiedUrl
         else:
-            self.detailurl = "https://www.airav.wiki/api/video/barcode/" + self.number.upper() + "?lng=zh-CN"
+            self.detailurl = "https://www.airav.wiki/api/video/barcode/" + self.number.upper() + "?lng=zh-TW"
         if self.addtion_Javbus:
             engine = Javbus()
             javbusinfo = engine.scrape(self.number, self)
@@ -36,9 +37,12 @@ class Airav(Parser):
                 self.javbus = {"title": ""}
             else:
                 self.javbus = json.loads(javbusinfo)
-        self.htmlcode = self.getHtml(self.detailurl)
+        self.htmlcode = self.get_by_scraper(self.detailurl)
+        # print("Search result: " + self.htmlcode)
+        if "</html>" in self.htmlcode: 
+            self.htmlcode = self.htmlcode.split("</html>")[1]
         # htmltree = etree.fromstring(self.htmlcode, etree.HTMLParser())
-        #result = self.dictformat(htmltree)
+        # result = self.dictformat(htmltree)
         htmltree = json.loads(self.htmlcode)["result"]
         result = self.dictformat(htmltree)
         return result
@@ -60,7 +64,7 @@ class Airav(Parser):
         #     if isinstance(result, str) and len(result):
         #         return result
         # number = super().getNum(htmltree)
-        # result = str(re.findall('^\[(.*?)]', number)[0])
+        # result = str(re.findall(r'^\[(.*?)]', number)[0])
         result = htmltree["barcode"]
         return result
 
@@ -93,7 +97,7 @@ class Airav(Parser):
             if isinstance(result, str) and len(result):
                 return result
         release = self.getRelease(htmltree)
-        return str(re.findall('\d{4}', release)).strip(" ['']")
+        return str(re.findall(r'\d{4}', release)).strip(" ['']")
 
     def getOutline(self, htmltree):
 
@@ -142,9 +146,6 @@ class Airav(Parser):
             result = self.javbus.get('cover')
             if isinstance(result, str) and len(result):
                 return result
-        result = htmltree['img_url']
-        if isinstance(result, str) and len(result):
-            return result
         return super().getCover(htmltree)
 
     def getSeries(self, htmltree):
@@ -153,7 +154,8 @@ class Airav(Parser):
             if isinstance(result, str) and len(result):
                 return result
         return ''
-    def getExtrafanart(self,htmltree):
+
+    def getExtrafanart(self, htmltree):
         try:
             result = htmltree["images"]
         except:
