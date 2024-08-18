@@ -25,8 +25,11 @@ def get(url: str, cookies=None, ua: str = None, extra_headers=None, return_type:
         headers.update(extra_headers)
     for i in range(retry):
         try:
+            allowRedirects = False
+            if 'www.dmm.co.jp' in url:
+                allowRedirects = True
             result = requests.get(url, headers=headers, timeout=timeout, proxies=proxies,
-                                  verify=verify, cookies=cookies)
+                                  verify=verify, cookies=cookies, allow_redirects=allowRedirects)
             if return_type == "object":
                 return result
             elif return_type == "content":
@@ -48,14 +51,15 @@ def get(url: str, cookies=None, ua: str = None, extra_headers=None, return_type:
     raise Exception('Connect Failed')
 
 
-def post(url: str, data: dict=None, files=None, cookies=None, ua: str=None, return_type: str=None, encoding: str=None,
-         retry: int=3, timeout: int=G_DEFAULT_TIMEOUT, proxies=None, verify=None):
+def post(url: str, data: dict = None, files=None, cookies=None, ua: str = None, extra_headers=None, return_type: str = None, encoding: str = None,
+         retry: int = 3, timeout: int = G_DEFAULT_TIMEOUT, proxies=None, verify=None):
     """
     是否使用代理应由上层处理
     """
     errors = ""
     headers = {"User-Agent": ua or G_USER_AGENT}
-
+    if extra_headers != None:
+        headers.update(extra_headers)
     for i in range(retry):
         try:
             result = requests.post(url, data=data, files=files, headers=headers, timeout=timeout, proxies=proxies,
@@ -96,15 +100,16 @@ class TimeoutHTTPAdapter(HTTPAdapter):
         return super().send(request, **kwargs)
 
 
-def request_session(cookies=None, ua: str=None, retry: int=3, timeout: int=G_DEFAULT_TIMEOUT, proxies=None, verify=None):
+def request_session(cookies=None, ua: str = None, retry: int = 3, timeout: int = G_DEFAULT_TIMEOUT, proxies=None, verify=None):
     """
     keep-alive
     """
-    session = requests.Session()
-    retries = Retry(total=retry, connect=retry, backoff_factor=1,
-                    status_forcelist=[429, 500, 502, 503, 504])
-    session.mount("https://", TimeoutHTTPAdapter(max_retries=retries, timeout=timeout))
-    session.mount("http://", TimeoutHTTPAdapter(max_retries=retries, timeout=timeout))
+    session = create_scraper(browser={'custom': ua or G_USER_AGENT, })
+    if retry > 0:
+        retries = Retry(total=retry, connect=retry, backoff_factor=1,
+                        status_forcelist=[429, 500, 502, 503, 504])
+        session.mount("https://", TimeoutHTTPAdapter(max_retries=retries, timeout=timeout))
+        session.mount("http://", TimeoutHTTPAdapter(max_retries=retries, timeout=timeout))
     if isinstance(cookies, dict) and len(cookies):
         requests.utils.add_dict_to_cookiejar(session.cookies, cookies)
     if verify:
@@ -122,10 +127,11 @@ def get_html_by_form(url, form_select: str = None, fields: dict = None, cookies:
     session = requests.Session()
     if isinstance(cookies, dict) and len(cookies):
         requests.utils.add_dict_to_cookiejar(session.cookies, cookies)
-    retries = Retry(total=retry, connect=retry, backoff_factor=1,
-                    status_forcelist=[429, 500, 502, 503, 504])
-    session.mount("https://", TimeoutHTTPAdapter(max_retries=retries, timeout=timeout))
-    session.mount("http://", TimeoutHTTPAdapter(max_retries=retries, timeout=timeout))
+    if retry > 0:
+        retries = Retry(total=retry, connect=retry, backoff_factor=1,
+                        status_forcelist=[429, 500, 502, 503, 504])
+        session.mount("https://", TimeoutHTTPAdapter(max_retries=retries, timeout=timeout))
+        session.mount("http://", TimeoutHTTPAdapter(max_retries=retries, timeout=timeout))
     if verify:
         session.verify = verify
     if proxies:
@@ -157,15 +163,23 @@ def get_html_by_form(url, form_select: str = None, fields: dict = None, cookies:
     return None
 
 # storyline javdb only
+
+
 def get_html_by_scraper(url: str = None, cookies: dict = None, ua: str = None, return_type: str = None,
-                        encoding: str = None, retry: int = 3, proxies=None, timeout: int = G_DEFAULT_TIMEOUT, verify=None):
+                        encoding: str = None, retry: int = 3, proxies=None, extra_headers: dict = None, timeout: int = G_DEFAULT_TIMEOUT, verify=None):
+
     session = create_scraper(browser={'custom': ua or G_USER_AGENT, })
+    headers = {"User-Agent": ua or G_USER_AGENT}
+    if extra_headers != None:
+        headers.update(extra_headers)
+    session.headers.update(headers)
     if isinstance(cookies, dict) and len(cookies):
         requests.utils.add_dict_to_cookiejar(session.cookies, cookies)
-    retries = Retry(total=retry, connect=retry, backoff_factor=1,
-                    status_forcelist=[429, 500, 502, 503, 504])
-    session.mount("https://", TimeoutHTTPAdapter(max_retries=retries, timeout=timeout))
-    session.mount("http://", TimeoutHTTPAdapter(max_retries=retries, timeout=timeout))
+    if retry > 0:
+        retries = Retry(total=retry, connect=retry, backoff_factor=1,
+                        status_forcelist=[429, 500, 502, 503, 504])
+        session.mount("https://", TimeoutHTTPAdapter(max_retries=retries, timeout=timeout))
+        session.mount("http://", TimeoutHTTPAdapter(max_retries=retries, timeout=timeout))
     if verify:
         session.verify = verify
     if proxies:
@@ -175,8 +189,8 @@ def get_html_by_scraper(url: str = None, cookies: dict = None, ua: str = None, r
             result = session.get(str(url))
         else:  # 空url参数直接返回可重用scraper对象，无需设置return_type
             return session
-        if not result.ok:
-            return None
+        # if not result.ok:
+        #     return None
         if return_type == "object":
             return result
         elif return_type == "content":
@@ -189,5 +203,5 @@ def get_html_by_scraper(url: str = None, cookies: dict = None, ua: str = None, r
     except requests.exceptions.ProxyError:
         print("[-]get_html_by_scraper() Proxy error! Please check your Proxy")
     except Exception as e:
-        print(f"[-]get_html_by_scraper() failed. {e}")
+        print(f"[-]get_html_by_scraper() failed {url}. {e}")
     return None
