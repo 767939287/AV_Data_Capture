@@ -9,8 +9,8 @@ headers = {
 
 def download_subtitles(filepath, path, multi_part, number, part, leak_word, c_word, hack_word) -> bool:
     try:
-        print(f"开始搜索{number}字幕...")
-        search_url = f"https://subtitlecat.com/index.php?search={number}"
+        print(f"开始搜索{name}字幕...")
+        search_url = f"https://subtitlecat.com/index.php?search={name}"
         response = requests.get(search_url, headers=headers)
         print(f"搜索URL: {search_url}, 状态码: {response.status_code}")
         if response.status_code != 200:
