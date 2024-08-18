@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import re
 import sys
@@ -21,9 +22,10 @@ def getInstance():
 
 
 class Config:
-    def __init__(self, path: str = "config.ini"):
+    def __init__(self, path: str = ".vscode/config.ini"):
         path_search_order = (
             Path(path),
+            Path.cwd() / ".vscode/config.ini",
             Path.cwd() / "config.ini",
             Path.home() / "mdc.ini",
             Path.home() / ".mdc.ini",
@@ -71,7 +73,7 @@ class Config:
             if res_path is None:
                 os._exit(2)
             ins = input("Or, Do you want me create a config file for you? (Yes/No)[Y]:")
-            if re.search('n', ins, re.I):
+            if re.search(r'n', ins, re.I):
                 os._exit(2)
             # 用户目录才确定具有写权限，因此选择 ~/mdc.ini 作为配置文件生成路径，而不是有可能并没有写权限的
             # 当前目录。目前版本也不再鼓励使用当前路径放置配置文件了，只是作为多配置文件的切换技巧保留。
@@ -184,7 +186,8 @@ class Config:
         return self.conf.getint("common", "link_mode")
 
     def scan_hardlink(self) -> bool:
-        return self.conf.getboolean("common", "scan_hardlink", fallback=False)#未找到配置选项,默认不刮削
+        # 未找到配置选项,默认不刮削
+        return self.conf.getboolean("common", "scan_hardlink", fallback=False)
 
     def failed_move(self) -> bool:
         return self.conf.getboolean("common", "failed_move")
@@ -195,8 +198,8 @@ class Config:
     def translate_to_sc(self) -> bool:
         return self.conf.getboolean("common", "translate_to_sc")
 
-    def multi_threading(self) -> bool:
-        return self.conf.getboolean("common", "multi_threading")
+    def multi_threading(self) -> int:
+        return self.conf.getint("common", "multi_threading")
 
     def del_empty_folder(self) -> bool:
         return self.conf.getboolean("common", "del_empty_folder")
@@ -235,9 +238,9 @@ class Config:
         if value.isnumeric() and int(value) >= 0:
             return int(value)
         sec = 0
-        sec += sum(int(v)  for v in re.findall(r'(\d+)s', value, re.I))
-        sec += sum(int(v)  for v in re.findall(r'(\d+)m', value, re.I)) * 60
-        sec += sum(int(v)  for v in re.findall(r'(\d+)h', value, re.I)) * 3600
+        sec += sum(int(v) for v in re.findall(r'(\d+)s', value, re.I))
+        sec += sum(int(v) for v in re.findall(r'(\d+)m', value, re.I)) * 60
+        sec += sum(int(v) for v in re.findall(r'(\d+)h', value, re.I)) * 3600
         return sec
 
     def is_translate(self) -> bool:
@@ -259,7 +262,7 @@ class Config:
         except:
             return 5
 
-    def watermark_type(self) -> int:
+    def watermark_postion(self) -> int:
         return int(self.conf.get("watermark", "water"))
 
     def get_uncensored(self):
@@ -348,7 +351,7 @@ class Config:
             return self.conf.getboolean("Name_Rule", "number_uppercase")
         except:
             return False
-        
+
     def number_regexs(self) -> str:
         try:
             return self.conf.get("Name_Rule", "number_regexs")
@@ -373,14 +376,14 @@ class Config:
     def debug(self) -> bool:
         return self.conf.getboolean("debug_mode", "switch")
 
-    def get_direct(self) -> bool:
-        return self.conf.getboolean("direct", "switch",fallback=True)
-    
     def is_storyline(self) -> bool:
         try:
             return self.conf.getboolean("storyline", "switch")
         except:
             return True
+
+    def debug_storyline(self) -> bool:
+        return self.conf.getboolean("storyline", "debug")
 
     def storyline_site(self) -> str:
         try:
@@ -501,7 +504,7 @@ class Config:
 
         sec7 = "escape"
         conf.add_section(sec7)
-        conf.set(sec7, "literals", "\()/")  # noqa
+        conf.set(sec7, "literals", r"\()/")  # noqa
         conf.set(sec7, "folders", "failed, JAV_output")
 
         sec8 = "debug_mode"
@@ -624,7 +627,6 @@ if __name__ == "__main__":
     def evprint(evstr):
         code = compile(evstr, "<string>", "eval")
         print('{}: "{}"'.format(evstr, eval(code)))
-
 
     config = Config()
     mfilter = {'conf', 'proxy', '_exit', '_default_config', 'ini_path', 'set_override'}
