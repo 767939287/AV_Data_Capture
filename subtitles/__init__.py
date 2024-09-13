@@ -1,4 +1,5 @@
 import requests
+import re
 from lxml import html
 from pathlib import Path
 
@@ -8,6 +9,7 @@ headers = {
 
 
 def download_subtitles(filepath, path, multi_part, number, part, leak_word, c_word, hack_word) -> bool:
+    number = re.sub(r'-CD\d+$', '', number)
     try:
         print(f"开始搜索{number}字幕...")
         search_url = f"https://subtitlecat.com/index.php?search={number}"
