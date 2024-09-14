@@ -299,6 +299,15 @@ def get_data_from_json(
 
     json_data['naming_rule'] = naming_rule
     json_data['original_naming_rule'] = original_naming_rule
+
+    if source == 'javbus':
+        json_data['headers'] = {
+            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Referer': 'https://www.javbus.com/' + number
+        }
+
     return json_data
 
 

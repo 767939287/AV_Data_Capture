@@ -117,6 +117,17 @@ def create_folder(json_data):  # 创建文件夹
 
 # path = examle:photo , video.in the Project Folder!
 def download_file_with_filename(url, filename, path, filepath, json_headers=None):
+    """
+    Downloads a file from the given URL and saves it with the specified filename in the provided path.
+    Args:
+        url (str): The URL of the file to download.
+        filename (str): The name to save the downloaded file as.
+        path (str): The path where the downloaded file should be saved.
+        filepath (str): The full filepath of the current script.
+        json_headers (dict, optional): Additional headers to include in the request. Defaults to None.
+    Returns:
+        None
+    """
     conf = config.getInstance()
     configProxy = conf.proxy()
 

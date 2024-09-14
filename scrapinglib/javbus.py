@@ -33,6 +33,7 @@ class Javbus(Parser):
 
     def search(self, number):
         self.number = number
+        self.extraheader = {"Accept-Language": "zh-CN,zh;q=0.9"}
         try:
             if self.specifiedUrl:
                 self.detailurl = self.specifiedUrl
@@ -66,7 +67,8 @@ class Javbus(Parser):
         """
         self.imagecut = 0
         self.uncensored = True
-
+        self.extraheader = {"Accept-Language": "zh-CN,zh;q=0.9"}
+        
         w_number = number.replace('.', '-')
         if self.specifiedUrl:
             self.detailurl = self.specifiedUrl

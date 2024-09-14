@@ -32,6 +32,7 @@ G_USER_AGENT = r'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (K
 
 
 def get_html(url, cookies: dict = None, ua: str = None, return_type: str = None, encoding: str = None, json_headers=None):
+    
     """
     网页请求核心函数
     """
@@ -42,6 +43,12 @@ def get_html(url, cookies: dict = None, ua: str = None, return_type: str = None,
     headers = {"User-Agent": ua or G_USER_AGENT}  # noqa
     if json_headers is not None:
         headers.update(json_headers)
+
+    if 'javbus' in url:
+        cookies = {
+            'PHPSESSID': 'svj9rcndkg4doo5s5cft02i713',
+            'existmag': 'mag'
+        }
 
     for i in range(config_proxy.retry):
         try:
