@@ -23,10 +23,10 @@ class Avsox(Parser):
         self.originalnum = ''
 
     def queryNumberUrl(self, number: str):
-        upnum = number.upper()
+        upnum = number.upper()  # 将原始字符串转换为大写
         if 'FC2' in upnum and 'FC2-PPV' not in upnum:
-            number = upnum.replace('FC2', 'FC2-PPV')
-            self.number = number
+            number = upnum.replace('FC2', 'FC2-PPV') # 如果原始字符串中包含'FC2'但不包含'FC2-PPV'，则将'FC2'替换为'FC2-PPV'
+            self.number = number # 更新类的属性self.number
         qurySiteTree = self.getHtmlTree('https://tellme.pw/avsox')
         site = self.getTreeElement(qurySiteTree, '//div[@class="container"]/div/a/@href')
         self.searchtree = self.getHtmlTree(site + '/cn/search/' + number)
@@ -44,11 +44,11 @@ class Avsox(Parser):
     def getNum(self, htmltree):
         new_number = self.getTreeElement(htmltree, self.expr_number)
         if new_number.upper() != self.number.upper():
-            raise ValueError('number not found in ' + self.source)
-        self.originalnum = new_number
-        if 'FC2-PPV' in new_number.upper():
-            new_number = new_number.upper().replace('FC2-PPV', 'FC2')
-        self.number = new_number
+            raise ValueError('number not found in ' + self.source) # 如果新编号与预期不符，则抛出异常
+        self.originalnum = new_number # 保存原始的新编号  
+        # if 'FC2-PPV' in new_number.upper():
+        #     new_number = new_number.upper().replace('FC2-PPV', 'FC2') # 如果新编号中包含'FC2-PPV'，则将其替换回'FC2'
+        # self.number = new_number # 更新self.number的值为最终的新编号
         return self.number
 
     def getTitle(self, htmltree):
