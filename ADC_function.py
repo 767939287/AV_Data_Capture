@@ -293,24 +293,24 @@ def get_javlib_cookie() -> [dict, str]:
     raw_cookie = {}
     user_agent = ""
 
-    # Get __cfduid/cf_clearance and user-agent
-    for i in range(retry_count):
-        try:
-            if switch == 1 or switch == '1':
-                raw_cookie, user_agent = cloudscraper.get_cookie_string(
-                    "http://www.javbus.com/",
-                    proxies=proxies
-                )
-            else:
-                raw_cookie, user_agent = cloudscraper.get_cookie_string(
-                    "http://www.javbus.com/"
-                )
-        except requests.exceptions.ProxyError:
-            print("[-] ProxyError, retry {}/{}".format(i + 1, retry_count))
-        except cloudscraper.exceptions.CloudflareIUAMError:
-            print("[-] IUAMError, retry {}/{}".format(i + 1, retry_count))
+    # # Get __cfduid/cf_clearance and user-agent
+    # for i in range(retry_count):
+    #     try:
+    #         if switch == 1 or switch == '1':
+    #             raw_cookie, user_agent = cloudscraper.get_cookie_string(
+    #                 "http://www.javbus.com/",
+    #                 proxies=proxies
+    #             )
+    #         else:
+    #             raw_cookie, user_agent = cloudscraper.get_cookie_string(
+    #                 "http://www.javbus.com/"
+    #             )
+    #     except requests.exceptions.ProxyError:
+    #         print("[-] ProxyError, retry {}/{}".format(i + 1, retry_count))
+    #     except cloudscraper.exceptions.CloudflareIUAMError:
+    #         print("[-] IUAMError, retry {}/{}".format(i + 1, retry_count))
 
-    return raw_cookie, user_agent
+    # return raw_cookie, user_agent
 
 
 def translate(
