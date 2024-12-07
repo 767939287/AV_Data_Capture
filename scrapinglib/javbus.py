@@ -33,7 +33,7 @@ class Javbus(Parser):
 
     def search(self, number):
         self.number = number
-        self.extraheader = {"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,zh-HK;q=0.7,zh-TW;q=0.6,ja;q=0.5"}
+        self.extraheader = {"accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7","Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,zh-HK;q=0.7,zh-TW;q=0.6,ja;q=0.5"}
         try:
             if self.specifiedUrl:
                 self.detailurl = self.specifiedUrl
