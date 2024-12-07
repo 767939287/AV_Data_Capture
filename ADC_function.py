@@ -46,7 +46,9 @@ def get_html(url, cookies: dict = None, ua: str = None, return_type: str = None,
         headers.update(json_headers)
 
     if 'javbus' in url:
-        javscraper = cfscrape.create_scraper(delay = 10)
+        import cloudscraper
+        resp = scraper.get(‘目标网站’).text
+        #javscraper = cfscrape.create_scraper(delay = 10)
         cookies = {
             'PHPSESSID': 'gjdd4ssfi4klhf0nohm9qfopo5',
             'starinfo': 'glyphicon%20glyphicon-plus',
@@ -295,12 +297,12 @@ def get_javlib_cookie() -> [dict, str]:
         try:
             if switch == 1 or switch == '1':
                 raw_cookie, user_agent = cloudscraper.get_cookie_string(
-                    "http://www.javlibrary.com/",
+                    "http://www.javbus.com/",
                     proxies=proxies
                 )
             else:
                 raw_cookie, user_agent = cloudscraper.get_cookie_string(
-                    "http://www.javlibrary.com/"
+                    "http://www.javbus.com/"
                 )
         except requests.exceptions.ProxyError:
             print("[-] ProxyError, retry {}/{}".format(i + 1, retry_count))
