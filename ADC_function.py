@@ -32,8 +32,8 @@ def get_xpath_single(html_code: str, xpath):
 G_USER_AGENT = r'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
 
 
-def get_html(url, cookies: dict = None, ua: str = None, return_type: str = None, encoding: str = None, json_headers=None, cookie_arg=None,user_agent=None):
-    
+#def get_html(url, cookies: dict = None, ua: str = None, return_type: str = None, encoding: str = None, json_headers=None, cookie_arg=None,user_agent=None):
+def get_html(url, cookies: dict = None, ua: str = None, return_type: str = None, encoding: str = None, json_headers=None):    
     """
     网页请求核心函数
     """
