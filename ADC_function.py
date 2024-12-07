@@ -49,7 +49,7 @@ def get_html(url, cookies: dict = None, ua: str = None, return_type: str = None,
         # import cloudscraper
         # resp = scraper.get(‘目标网站’).text
         #javscraper = cfscrape.create_scraper(delay = 10)
-        cookie_arg, user_agent = cfscrape.get_cookie_string("https://www.javbus.com")
+        #cookie_arg, user_agent = cfscrape.get_cookie_string("https://www.javbus.com")
         cookies = {
             'PHPSESSID': 'gjdd4ssfi4klhf0nohm9qfopo5',
             'starinfo': 'glyphicon%20glyphicon-plus',
