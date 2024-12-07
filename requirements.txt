@@ -13,3 +13,5 @@ certifi
 MechanicalSoup
 opencc-python-reimplemented
 chardet
+cfscrape
+cloudscraper
