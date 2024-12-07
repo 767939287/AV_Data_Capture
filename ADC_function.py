@@ -6,6 +6,7 @@ import uuid
 import json
 import time
 import typing
+import cfscrape
 from unicodedata import category
 from concurrent.futures import ThreadPoolExecutor
 
@@ -44,7 +45,8 @@ def get_html(url, cookies: dict = None, ua: str = None, return_type: str = None,
     if json_headers is not None:
         headers.update(json_headers)
 
-    if 'javbus' in url:
+    if 'abcbus' in url:
+        abcscraper = cfscrape.create_scraper(delay = 10)
         cookies = {
             'PHPSESSID': 'gjdd4ssfi4klhf0nohm9qfopo5',
             'starinfo': 'glyphicon%20glyphicon-plus',
@@ -280,32 +282,32 @@ def get_html_by_scraper(url: str = None, cookies: dict = None, ua: str = None, r
     return None
 
 
-# def get_javlib_cookie() -> [dict, str]:
-#     import cloudscraper
-#     switch, proxy, timeout, retry_count, proxytype = config.getInstance().proxy()
-#     proxies = get_proxy(proxy, proxytype)
-#
-#     raw_cookie = {}
-#     user_agent = ""
-#
-#     # Get __cfduid/cf_clearance and user-agent
-#     for i in range(retry_count):
-#         try:
-#             if switch == 1 or switch == '1':
-#                 raw_cookie, user_agent = cloudscraper.get_cookie_string(
-#                     "http://www.javlibrary.com/",
-#                     proxies=proxies
-#                 )
-#             else:
-#                 raw_cookie, user_agent = cloudscraper.get_cookie_string(
-#                     "http://www.javlibrary.com/"
-#                 )
-#         except requests.exceptions.ProxyError:
-#             print("[-] ProxyError, retry {}/{}".format(i + 1, retry_count))
-#         except cloudscraper.exceptions.CloudflareIUAMError:
-#             print("[-] IUAMError, retry {}/{}".format(i + 1, retry_count))
-#
-#     return raw_cookie, user_agent
+def get_javlib_cookie() -> [dict, str]:
+    import cloudscraper
+    switch, proxy, timeout, retry_count, proxytype = config.getInstance().proxy()
+    proxies = get_proxy(proxy, proxytype)
+
+    raw_cookie = {}
+    user_agent = ""
+
+    # Get __cfduid/cf_clearance and user-agent
+    for i in range(retry_count):
+        try:
+            if switch == 1 or switch == '1':
+                raw_cookie, user_agent = cloudscraper.get_cookie_string(
+                    "http://www.javlibrary.com/",
+                    proxies=proxies
+                )
+            else:
+                raw_cookie, user_agent = cloudscraper.get_cookie_string(
+                    "http://www.javlibrary.com/"
+                )
+        except requests.exceptions.ProxyError:
+            print("[-] ProxyError, retry {}/{}".format(i + 1, retry_count))
+        except cloudscraper.exceptions.CloudflareIUAMError:
+            print("[-] IUAMError, retry {}/{}".format(i + 1, retry_count))
+
+    return raw_cookie, user_agent
 
 
 def translate(

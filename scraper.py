@@ -2,6 +2,8 @@
 import json
 import secrets
 import typing
+import cfscrape
+
 from pathlib import Path
 
 # third party lib
