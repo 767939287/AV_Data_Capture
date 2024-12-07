@@ -12,7 +12,6 @@ from .parser import Parser
 class Javbus(Parser):
 
     source = 'javbus'
-    cookie_cf = cfscrape.get_cookie_string("https://www.javbus.com")
     expr_number = '/html/head/meta[@name="keywords"]/@content'
     expr_title = '/html/head/title/text()'
     expr_studio = '//span[contains(text(),"製作商:")]/../a/text()'
