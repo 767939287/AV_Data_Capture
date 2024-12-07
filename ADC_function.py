@@ -50,7 +50,7 @@ def get_html(url, cookies: dict = None, ua: str = None, return_type: str = None,
         cookies = {
             'PHPSESSID': 'gjdd4ssfi4klhf0nohm9qfopo5',
             'starinfo': 'glyphicon%20glyphicon-plus',
-            'existmag': 'all'
+            'existmag': 'all',
             'cf_clearance': '4bYNJzgMspa.tFeF2KK1VfwCYYu7ALFCXYVuDmIQI5A-1733546401-1.2.1.1-dFzxo3l6EXMeEasZviDqBaohbPh6XpmjGy7ghMnFX1eifsNxpRAT2Uqav7dfcwLHWnEtmMT9suScSrNVcJsbYQzip2vVRSOqV2P7J4VoPY0K.MPs7Xg9Cs00DE_sfocm97lvAJCiG7wGrctQGXfIVwmZLoFTmFF.vH1v73RZlpBWTpH2PY4Y2lgE8dcNjKhC3EjgWzqZtfiWWyqBffElumf5snmu1pwPKrgME14RL_xyR9CyjRj1ZVWu2S5iSLPguaDY65.5h7mfR.9WttpeM26D1cJrBJqi5cbvM4xu0yV.duOmfAdBR5evGE2DtMQl6Y7433x8a8I_IDLOgalhN9id6hMw3yr_hteB6Zislk6OyHknLJHPxSasJEgR_WuW4pF8Q56Ckb_XxQRfv6WqGQBiI7uOaZXPV5CP1RgSN2Xvfn6H3hvAxZnf8HbySnLt'
             #'existmag': 'mag'
         }
