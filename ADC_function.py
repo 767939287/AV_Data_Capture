@@ -45,8 +45,8 @@ def get_html(url, cookies: dict = None, ua: str = None, return_type: str = None,
     if json_headers is not None:
         headers.update(json_headers)
 
-    if 'abcbus' in url:
-        abcscraper = cfscrape.create_scraper(delay = 10)
+    if 'javbus' in url:
+        javscraper = cfscrape.create_scraper(delay = 10)
         cookies = {
             'PHPSESSID': 'gjdd4ssfi4klhf0nohm9qfopo5',
             'starinfo': 'glyphicon%20glyphicon-plus',
