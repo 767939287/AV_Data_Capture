@@ -47,9 +47,9 @@ def get_html(url, cookies: dict = None, ua: str = None, return_type: str = None,
     if 'javbus' in url:
         cookies = {
             'PHPSESSID': 'gjdd4ssfi4klhf0nohm9qfopo5',
-            #'existmag': 'mag'
-            'starinfo'='glyphicon%20glyphicon-plus',
+            'starinfo': 'glyphicon%20glyphicon-plus',
             'existmag': 'all'
+            #'existmag': 'mag'
         }
 
     for i in range(config_proxy.retry):
