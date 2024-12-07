@@ -46,8 +46,8 @@ def get_html(url, cookies: dict = None, ua: str = None, return_type: str = None,
         headers.update(json_headers)
 
     if 'javbus' in url:
-        import cloudscraper
-        resp = scraper.get(‘目标网站’).text
+        # import cloudscraper
+        # resp = scraper.get(‘目标网站’).text
         #javscraper = cfscrape.create_scraper(delay = 10)
         cookies = {
             'PHPSESSID': 'gjdd4ssfi4klhf0nohm9qfopo5',
