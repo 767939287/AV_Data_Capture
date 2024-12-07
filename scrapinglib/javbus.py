@@ -4,6 +4,7 @@ import re
 import os
 import secrets
 import inspect
+import cfscrape
 from lxml import etree
 from urllib.parse import urljoin
 from .parser import Parser
@@ -84,7 +85,8 @@ class Javbus(Parser):
     def extradict(self, dic: dict):
         """ 额外新增的  headers
         """
-        dic['headers'] = {'cookie': 'existmag=mag', "referer": self.detailurl}
+        cookie_cf = cfscrape.get_cookie_string("https://www.javbus.com")
+        dic['headers'] = {'cookie': 'existmag=mag', "referer": self.detailurl,cookie_cf}
         return dic
 
     def getNum(self, htmltree):
