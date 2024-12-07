@@ -33,8 +33,9 @@ class Javbus(Parser):
     expr_uncensored = '//*[@id="navbar"]/ul[1]/li[@class="active"]/a[contains(@href,"uncensored")]'
 
     def search(self, number):
+        cookie_cf = cfscrape.get_cookie_string("https://www.javbus.com")
         self.number = number
-        self.extraheader = {cookie_cf,"accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7","Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,zh-HK;q=0.7,zh-TW;q=0.6,ja;q=0.5"}
+        self.extraheader = {"accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7","Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,zh-HK;q=0.7,zh-TW;q=0.6,ja;q=0.5"}
         try:
             if self.specifiedUrl:
                 self.detailurl = self.specifiedUrl
@@ -68,7 +69,7 @@ class Javbus(Parser):
         """
         self.imagecut = 0
         self.uncensored = True
-        self.extraheader = {"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,zh-HK;q=0.7,zh-TW;q=0.6,ja;q=0.5"}
+        self.extraheader = {"accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7","Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,zh-HK;q=0.7,zh-TW;q=0.6,ja;q=0.5"}
         
         w_number = number.replace('.', '-')
         if self.specifiedUrl:
@@ -85,7 +86,7 @@ class Javbus(Parser):
     def extradict(self, dic: dict):
         """ 额外新增的  headers
         """
-        dic['headers'] = {'cookie': 'existmag=mag', "referer": self.detailurl}
+        dic['headers'] = {'cookie': 'existmag=all', "referer": self.detailurl}
         return dic
 
     def getNum(self, htmltree):
