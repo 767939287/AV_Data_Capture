@@ -6,7 +6,7 @@ from .parser import Parser
 
 
 class Javlibrary(Parser):
-    source = 'javlibrary'
+    source = ' javlib.com'
 
     expr_number = '//div[@id="video_id"]/table/tr/td[@class="text"]/text()'
     expr_title = '//div[@id="video_title"]/h3/a/text()'
@@ -50,7 +50,7 @@ class Javlibrary(Parser):
         return result
 
     def queryNumberUrl(self, number: str):
-        queryUrl = "https://www.javlibrary.com/cn/vl_searchbyid.php?keyword=" + number
+        queryUrl = "https://www.r86m.com/cn/vl_searchbyid.php?keyword=" + number
         queryResult = self.session.get(queryUrl)
 
         if queryResult and "/?v=jav" in queryResult.url:
@@ -62,7 +62,7 @@ class Javlibrary(Parser):
             if number in numbers:
                 urls = queryTree.xpath('//div[@class="id"]/../@href')
                 detailurl = urls[numbers.index(number)]
-                return "https://www.javlibrary.com/cn" + detailurl.strip('.')
+                return "https://www.r86m.com/cn" + detailurl.strip('.')
         return None
 
     def getTitle(self, htmltree):
