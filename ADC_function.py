@@ -46,28 +46,24 @@ def get_html(url, cookies: dict = None, ua: str = None, return_type: str = None,
         headers.update(json_headers)
 
     if 'javbus' in url:
-        # 获取 Cloudflare cookies 和 User-Agent
-        cf_cookie_arg, cf_user_agent = cfscrape.get_cookie_string("https://www.javbus.com")
-        
-        # 将 Cloudflare cookies 转换为字典
-        cf_cookies = dict(cookie.split('=', 1) for cookie in cf_cookie_arg.split('; '))
-        
-        # 更新 User-Agent
-        headers["User-Agent"] = cf_user_agent
-        
-        # 现有的 cookies
-        default_cookies = {
+        # import cloudscraper
+        # resp = scraper.get(‘目标网站’).text
+        #javscraper = cfscrape.create_scraper(delay = 10)
+        #cookie_arg, user_agent = cfscrape.get_cookie_string("https://www.javbus.com")
+        cookies = {
             'PHPSESSID': 'gjdd4ssfi4klhf0nohm9qfopo5',
             'starinfo': 'glyphicon%20glyphicon-plus',
             'existmag': 'all',
-            # 'existmag': 'mag'
+            #'existmag': 'mag'
+        }
+    elif 'javlibrary' in url:
+        cookies = {
+            'PHPSESSID': 'gjdd4ssfi4klhf0nohm9qfopo5',
+            'starinfo': 'glyphicon%20glyphicon-plus',
+            'existmag': 'all',
+            #'existmag': 'mag'
         }
         
-        # 合并现有 cookies 和 Cloudflare cookies
-        cookies = cookies or {}
-        cookies.update(default_cookies)
-        cookies.update(cf_cookies)
-
     for i in range(config_proxy.retry):
         try:
             if config_proxy.enable:
