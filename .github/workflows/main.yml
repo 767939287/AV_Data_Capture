@@ -73,9 +73,12 @@ jobs:
             --add-data "scrapinglib;scrapinglib" `
             --add-data "config.ini;." `
 
+      - name: Build with PyInstaller
+        run: |
+          mkdir -p dist 
+
       - name: Copy config.ini
         run: |
-          mkdir -p dist
           cp config.ini dist/
 
       - name: Set VERSION variable for macos/ubuntu
