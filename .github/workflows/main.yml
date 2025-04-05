@@ -72,11 +72,7 @@ jobs:
             --add-data "Img;Img" `
             --add-data "scrapinglib;scrapinglib" `
             --add-data "config.ini;." `
-
-      - name: Build with PyInstaller
-        run: |
-          mkdir -p dist 
-
+            
       - name: Copy config.ini
         run: |
           cp config.ini dist/
