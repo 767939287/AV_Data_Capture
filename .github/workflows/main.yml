@@ -13,12 +13,9 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     strategy:
-      # matrix:
-        # os: [windows-latest, macos-latest, ubuntu-latest]
-        # os: [ubuntu-latest]
-        # os: [ubuntu-22.04] 
       matrix:
-        os: [ubuntu-20.04]
+        # os: [windows-latest, macos-latest, ubuntu-latest]
+        os: [ubuntu-22.04]
     steps:
       - uses: actions/checkout@v2
 
@@ -78,6 +75,7 @@ jobs:
 
       - name: Copy config.ini
         run: |
+          mkdir -p dist
           cp config.ini dist/
 
       - name: Set VERSION variable for macos/ubuntu
