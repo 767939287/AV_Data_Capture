@@ -21,12 +21,12 @@ jobs:
 
       - name: Install UPX
         uses: crazy-max/ghaction-upx@v2
-        if: matrix.os == 'windows-latest' || matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest'  || matrix.os == 'ubuntu-22.04'  || matrix.os == 'ubuntu-20.04'
         with:
           install-only: true
 
       - name: UPX version
-        if: matrix.os == 'windows-latest' || matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest'  || matrix.os == 'ubuntu-22.04'  || matrix.os == 'ubuntu-20.04'
         run: upx --version
 
       - name: Setup Python 3.10
@@ -46,7 +46,7 @@ jobs:
           python number_parser.py -v
 
       - name: Build with PyInstaller for macos/ubuntu
-        if: matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest'  || matrix.os == 'ubuntu-22.04'  || matrix.os == 'ubuntu-20.04'
         run: |
           pyinstaller \
             --onefile Movie_Data_Capture.py \
@@ -95,7 +95,7 @@ jobs:
           path: dist
 
       - name: Run test (Ubuntu & MacOS)
-        if: matrix.os == 'ubuntu-latest' || matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest'  || matrix.os == 'ubuntu-22.04'  || matrix.os == 'ubuntu-20.04'
         run: |
           cd dist
           touch YMDD-405.mp4
