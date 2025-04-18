@@ -123,7 +123,7 @@ class Fanza(Parser):
     def getCover(self, htmltree):
         cover_number = self.number
         try:
-            result = htmltree.xpath('//*[@id="' + cover_number + '"]/@href')[0]
+            result = htmltree.xpath('//*[@id="sample-image1"]/img/@src')[0]
         except:
             # sometimes fanza modify _ to \u0005f for image id
             if "_" in cover_number:
@@ -145,7 +145,7 @@ class Fanza(Parser):
             extrafanart_images = re.findall(r'<img.*?src=\"(.*?)\"', htmltext)
             if extrafanart_images:
                 sheet = []
-                for img_url in extrafanart_images:
+                for img_url in extrafanart_images[1:]:
                     url_cuts = img_url.rsplit('-', 1)
                     sheet.append(url_cuts[0] + 'jp-' + url_cuts[1])
                 return sheet

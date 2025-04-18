@@ -45,6 +45,8 @@ class Javbus(Parser):
                     newnumber = "DV-1649_2014-07-25"
                 if number == "DV-1195":
                     newnumber = "DV-1195_2010-10-08"
+                if number == "BKD-003" :
+                    newnumber = "BKD-003_2009-09-05"                     
                 self.detailurl = 'https://www.javbus.com/' + newnumber
                 self.htmlcode = self.getHtml(self.detailurl)
             except:
@@ -142,9 +144,18 @@ class Javbus(Parser):
 
     def getOutline(self, htmltree):
         if self.morestoryline:
-            if any(caller for caller in inspect.stack() if os.path.basename(caller.filename) == 'airav.py'):
-                return ''   # 从airav.py过来的调用不计算outline直接返回，避免重复抓取数据拖慢处理速度
+            if any(
+                caller
+                for caller in inspect.stack()
+                if os.path.basename(caller.filename) == "airav.py"
+            ):
+                return ""  # 从airav.py过来的调用不计算outline直接返回，避免重复抓取数据拖慢处理速度
             from .storyline import getStoryline
-            return getStoryline(self.number, uncensored=self.uncensored,
-                                proxies=self.proxies, verify=self.verify)
-        return ''
+
+            return getStoryline(
+                self.number,
+                uncensored=self.uncensored,
+                proxies=self.proxies,
+                verify=self.verify,
+            )
+        return ""

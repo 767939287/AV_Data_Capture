@@ -1,5 +1,6 @@
 # build-in lib
 import json
+import re
 import secrets
 import typing
 import cfscrape
@@ -170,6 +171,10 @@ def get_data_from_json(
     # 处理大写
     if conf.number_uppercase():
         json_data['number'] = number.upper()
+
+    if json_data['source'] == 'fanza':
+        json_data['number'] = re.sub(r'(?<=\D)00(?=\d)', '-', json_data['number'])
+        json_data['number'] = re.sub(r'^[0-9]+', '', json_data['number'])
 
     # 返回处理后的json_data
     json_data['title'] = title
