@@ -1046,6 +1046,12 @@ def core_main(movie_path, number_th, oCC, specified_source=None, specified_url=N
         else:
             image_download(cover, fanart_path, thumb_path, path, movie_path)
 
+        move_status = move_subtitles(movie_path, path, multi_part, number, part, leak_word, c_word, hack_word)
+        if move_status:
+            cn_sub = True
+        else:
+            cn_sub = cn_sub or download_subtitles(movie_path, path, multi_part, number, part, leak_word, c_word, hack_word)
+
         if not multi_part or part.lower() == '-cd1':
             try:
                 # 下载预告片

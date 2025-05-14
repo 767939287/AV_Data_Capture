@@ -41,14 +41,14 @@ def open_download(subtitle_link,path,number,leak_word,c_word,hack_word):
     if subtitle_response.status_code != 200:
         return False
     tree = html.fromstring(subtitle_response.content)
-    # ext = "zh-CN.srt"
-    ext = "srt"
+    ext = "zh-CN.srt"
+    # ext = "srt"
     download_links = tree.xpath('//div[@class="sub-single"]/span/a[contains(@href, "zh-CN.srt")]/@href')
     if not download_links:
         print("未找到简体中文字幕下载链接")
         download_links = tree.xpath('//div[@class="sub-single"]/span/a[contains(@href, "zh-TW.srt")]/@href')
-        # ext = "zh-TW.srt"
-        ext = "srt"
+        ext = "zh-TW.srt"
+        # ext = "srt"
     if not download_links:
         print("未找到繁体中文字幕下载链接")
         return False
