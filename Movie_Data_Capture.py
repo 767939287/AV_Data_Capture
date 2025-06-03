@@ -655,10 +655,10 @@ def main(args: tuple) -> Path:
                     time.sleep(sleep_seconds)
                 
                 t = threading.Thread(target=create_data_and_move, args=(movie_path, zero_op, no_net_op, oCC, thread_list))
-                thread_list.append(t.getName())
+                thread_list.append(t.name)
                 t.start()
             else :
-                thread_list.append(threading.current_thread().getName())
+                thread_list.append(threading.current_thread().name)
                 create_data_and_move(movie_path, zero_op, no_net_op, oCC, thread_list)
 
             if count >= stop_count:
