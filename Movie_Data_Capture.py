@@ -648,19 +648,17 @@ def main(args: tuple) -> Path:
             percentage = str(count / int(count_all) * 100)[:4] + '%'
             print('[!] {:>30}{:>21}'.format('- ' + percentage + ' [' + str(count) + '/' + count_all + '] -',
                                             time.strftime("%H:%M:%S")))
-            t = threading.Thread(target=create_data_and_move, args=(movie_path, zero_op, no_net_op, oCC, semaphore))
-            t.start()
-
+                
             if thread_stop > 0 :
                 while len(thread_list) >= thread_stop :
                     sleep_seconds = random.randint(conf.sleep(), conf.sleep() + 2)
                     time.sleep(sleep_seconds)
                 
                 t = threading.Thread(target=create_data_and_move, args=(movie_path, zero_op, no_net_op, oCC, thread_list))
-                thread_list.append(t.name)
+                thread_list.append(t.getName())
                 t.start()
             else :
-                thread_list.append(threading.current_thread().name)
+                thread_list.append(threading.current_thread().getName())
                 create_data_and_move(movie_path, zero_op, no_net_op, oCC, thread_list)
 
             if count >= stop_count:
