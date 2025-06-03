@@ -629,8 +629,7 @@ def main(args: tuple) -> Path:
         count_all = str(len(movie_list))
         print('[+]Find', count_all, 'movies.')
         print('[*]======================================================')
-        stop_count = conf.stop_counter()
-        semaphore = threading.BoundedSemaphore(3)        
+        stop_count = conf.stop_counter()        
         if stop_count < 1:
             stop_count = 999999
         else:
@@ -641,18 +640,24 @@ def main(args: tuple) -> Path:
         thread_list = []
         for movie_path in movie_list:  # 遍历电影列表 交给core处理
 
+            while threading.active_count() > 3 :
+                sleep_seconds = random.randint(conf.sleep(), conf.sleep() + 2)
+                time.sleep(sleep_seconds)
+
             count = count + 1
             percentage = str(count / int(count_all) * 100)[:4] + '%'
             print('[!] {:>30}{:>21}'.format('- ' + percentage + ' [' + str(count) + '/' + count_all + '] -',
                                             time.strftime("%H:%M:%S")))
-                
+            t = threading.Thread(target=create_data_and_move, args=(movie_path, zero_op, no_net_op, oCC, semaphore))
+            t.start()
+
             if thread_stop > 0 :
                 while len(thread_list) >= thread_stop :
                     sleep_seconds = random.randint(conf.sleep(), conf.sleep() + 2)
                     time.sleep(sleep_seconds)
                 
                 t = threading.Thread(target=create_data_and_move, args=(movie_path, zero_op, no_net_op, oCC, thread_list))
-                thread_list.append(t.getName())
+                thread_list.append(t.name)
                 t.start()
             else :
                 thread_list.append(threading.current_thread().name)
