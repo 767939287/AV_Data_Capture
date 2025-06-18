@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 
 from functools import lru_cache
+import os
 import re
 import json
 from .parser import Parser
 import config
 import importlib
 import traceback
+import secrets
+from ADC_function import (load_cookies,
+                          file_modification_days)
 
 
 def search(number, sources: str = None, **kwargs):
@@ -52,7 +56,27 @@ class Scraping:
     dbsite = None
     # 使用storyline方法进一步获取故事情节
     morestoryline = False
+    # 新增方法：根据爬虫名称加载对应cookie
 
+    def load_cookies_for_source(self, source, dbsite):
+        """统一cookie加载逻辑"""
+        # 特殊处理javdb多站点逻辑
+        if source == "javdb":
+            cookie_file = f"{dbsite}.json"
+        else:
+            cookie_file = f"{source}.json"
+        cookies_dict, cookies_path = load_cookies(cookie_file)
+        if not isinstance(cookies_dict, dict):
+            return None
+        # 有效期验证
+        cdays = file_modification_days(cookies_path)
+        if cdays < 7:
+            if self.debug:
+                print(f"[Cookie] 加载有效cookie文件: {cookies_path}")
+            return cookies_dict
+
+        return None
+        
     def search(self, number, sources=None, proxies=None, verify=None, type='adult',
                specifiedSource=None, specifiedUrl=None,
                dbcookies=None, dbsite=None, morestoryline=False,
@@ -65,10 +89,21 @@ class Scraping:
         self.dbcookies = dbcookies
         self.dbsite = dbsite
         self.morestoryline = morestoryline
+        # 动态加载各爬虫的cookie
+        valid_cookies = {}
+        for source in sources:
+            if source_cookies := self.load_cookies_for_source(source, dbsite):
+                valid_cookies[source] = source_cookies
+
+        # 构造爬虫配置
+        self.dbsite = dbsite
+        self.dbcookies = valid_cookies  # 改为字典结构存储多爬虫cookie
+
+        print(f"当前爬虫sources: {sources}")
         if type == 'adult':
-            return self.searchAdult(number, sources)
+            return self.searchAdult(number, tuple(sources))
         else:
-            return self.searchGeneral(number, sources)
+            return self.searchGeneral(number, tuple(sources))
 
     @lru_cache(maxsize=None)
     def searchGeneral(self, name, sources):
@@ -85,7 +120,8 @@ class Scraping:
                 if self.debug:
                     print('[+]select', source)
                 try:
-                    module = importlib.import_module('.' + source, 'scrapinglib')
+                    module = importlib.import_module(
+                        '.' + source, 'scrapinglib')
                     parser_type = getattr(module, source.capitalize())
                     parser: Parser = parser_type()
                     data = parser.scrape(name, self)
@@ -121,7 +157,7 @@ class Scraping:
     def searchAdult(self, number, sources):
         if self.specifiedSource:
             sources = [self.specifiedSource]
-        elif type(sources) is list:
+        elif len(sources) > 1:
             pass
         else:
             sources = self.checkAdultSources(sources, number)
@@ -140,7 +176,7 @@ class Scraping:
                     json_data = json.loads(data)
                 except Exception as e:
                     if config.getInstance().debug():
-                        print(e)
+                        traceback.print_exception(e)
                     # json_data = self.func_mapping[source](number, self)
                 # if any service return a valid return, break
                 if self.get_data_state(json_data):

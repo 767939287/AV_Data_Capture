@@ -13,7 +13,7 @@ class Javdb(Parser):
     expr_number = '//strong[contains(text(),"番號")]/../span/text()'
     expr_number2 = '//strong[contains(text(),"番號")]/../span/a/text()'
     expr_title = "/html/head/title/text()"
-    expr_title_no = '//*[contains(@class,"movie-list")]/div/a/div[contains(@class, "video-title")]/text()'
+    expr_title_no = '//*[contains(@class,"movie-list")]/div/a/div[contains(@class, "video-title")]/strong/text()'
     expr_runtime = '//strong[contains(text(),"時長")]/../span/text()'
     expr_runtime2 = '//strong[contains(text(),"時長")]/../span/a/text()'
     expr_uncensored = '//strong[contains(text(),"類別")]/../span/a[contains(@href,"/tags/uncensored?") or contains(@href,"/tags/western?")]'
@@ -55,7 +55,7 @@ class Javdb(Parser):
             self.specifiedUrl = core.specifiedUrl
         # special
         if core.dbcookies:
-            self.cookies = core.dbcookies
+            self.cookies = core.dbcookies.get(self.source, {'over18':'1', 'theme':'auto', 'locale':'zh'})
         else:
             self.cookies =  {'over18':'1', 'theme':'auto', 'locale':'zh'}
         if core.dbsite:
@@ -80,7 +80,7 @@ class Javdb(Parser):
         return result
 
     def queryNumberUrl(self, number):
-        javdb_url = 'https://' + self.dbsite + '.com/search?q=' + number + '&f=all'
+        javdb_url = f'https://{self.dbsite}.com/search?q={number}&f=all'
         try:
             resp = get_html_by_scraper(javdb_url, cookies=self.cookies, proxies=self.proxies, verify=self.verify, return_type="object")
         # except Exception as e:
