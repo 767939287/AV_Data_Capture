@@ -3,7 +3,6 @@
 from functools import lru_cache
 import os
 import re
-from scrapinglib import QueryError
 import json
 from .parser import Parser
 import config
@@ -102,9 +101,9 @@ class Scraping:
 
         print(f"当前爬虫sources: {sources}")
         if type == 'adult':
-            return self.searchAdult(number, tuple(sources))
+            return self.searchAdult(number, sources)
         else:
-            return self.searchGeneral(number, tuple(sources))
+            return self.searchGeneral(number, sources)
 
     @lru_cache(maxsize=None)
     def searchGeneral(self, name, sources):
@@ -121,21 +120,16 @@ class Scraping:
                 if self.debug:
                     print('[+]select', source)
                 try:
-                    module = importlib.import_module(
-                        '.' + source, 'scrapinglib')
+                    module = importlib.import_module('.' + source, 'scrapinglib')
                     parser_type = getattr(module, source.capitalize())
                     parser: Parser = parser_type()
                     data = parser.scrape(name, self)
                     if data == 404:
                         continue
                     json_data = json.loads(data)
-                except QueryError as e:  # 捕获特定异常
-                    if self.debug:
-                        print(f"[!] 查询异常: {e.message}")
-                    continue  # 直接跳过不打印堆栈
                 except Exception as e:
-                    if self.debug:
-                        traceback.print_exception(e)
+                    if config.getInstance().debug():
+                        print(e)
                 # if any service return a valid return, break
                 if self.get_data_state(json_data):
                     if self.debug:
@@ -162,7 +156,7 @@ class Scraping:
     def searchAdult(self, number, sources):
         if self.specifiedSource:
             sources = [self.specifiedSource]
-        elif len(sources) > 1:
+        elif type(sources) is list:
             pass
         else:
             sources = self.checkAdultSources(sources, number)
@@ -179,13 +173,9 @@ class Scraping:
                     if data == 404:
                         continue
                     json_data = json.loads(data)
-                except QueryError as e:  # 捕获特定异常
-                    if self.debug:
-                        print(f"[!] 查询异常: {e.message}")
-                    continue  # 直接跳过不打印堆栈                    
                 except Exception as e:
-                    if self.debug:
-                        traceback.print_exception(e)
+                    if config.getInstance().debug():
+                        print(e)
                     # json_data = self.func_mapping[source](number, self)
                 # if any service return a valid return, break
                 if self.get_data_state(json_data):
