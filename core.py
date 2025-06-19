@@ -1086,3 +1086,10 @@ def core_main(movie_path, number_th, oCC, specified_source=None, specified_url=N
                     tag, json_data.get('actor_list'), liuchu, uncensored, hack, hack_word, _4k, fanart_path,
                     poster_path,
                     thumb_path, iso)
+
+    elif conf.main_mode() == 4:
+        path = str(Path(movie_path).parent)
+        if multi_part == 1:
+            number += part  # 这时number会被附加上CD1后缀
+
+        download_subtitles(movie_path, path, multi_part, number, part, leak_word, c_word, hack_word)

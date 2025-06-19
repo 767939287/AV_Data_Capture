@@ -518,7 +518,7 @@ def main(args: tuple) -> Path:
     conf = config.getInstance()
     main_mode = conf.main_mode()
     folder_path = ""
-    if main_mode not in (1, 2, 3):
+    if main_mode not in (1, 2, 3, 4):
         print(f"[-]Main mode must be 1 or 2 or 3! You can run '{os.path.basename(sys.argv[0])} --help' for more help.")
         os._exit(4)
 
