@@ -1067,10 +1067,11 @@ def core_main(movie_path, number_th, oCC, specified_source=None, specified_url=N
             except:
                 pass
 
+        download_subtitles(movie_path, path, multi_part, number, part, leak_word, c_word, hack_word)
+
         # 裁剪图
         cutImage(imagecut, path, fanart_path, poster_path, bool(conf.face_uncensored_only() and not uncensored))
         
-        download_subtitles(movie_path, path, multi_part, number, part, leak_word, c_word, hack_word)
 
         # 添加水印
         if conf.is_watermark():
