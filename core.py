@@ -993,6 +993,13 @@ def core_main(movie_path, number_th, oCC, specified_source=None, specified_url=N
             except:
                 pass
 
+        # Move subtitles
+        move_status = move_subtitles(movie_path, path, multi_part, number, part, leak_word, c_word, hack_word)
+        if move_status:
+            cn_sub = True
+        else:
+            cn_sub = cn_sub or download_subtitles(movie_path, path, multi_part, number, part, leak_word, c_word, hack_word)
+
         # 裁剪图
         cutImage(imagecut, path, thumb_path, poster_path, bool(conf.face_uncensored_only() and not uncensored))
 
@@ -1003,12 +1010,6 @@ def core_main(movie_path, number_th, oCC, specified_source=None, specified_url=N
         # 移动电影
         paste_file_to_folder(movie_path, path, multi_part, number, part, leak_word, c_word, hack_word)
 
-        # Move subtitles
-        move_status = move_subtitles(movie_path, path, multi_part, number, part, leak_word, c_word, hack_word)
-        if move_status:
-            cn_sub = True
-        else:
-            cn_sub = cn_sub or download_subtitles(movie_path, path, multi_part, number, part, leak_word, c_word, hack_word)
         # 添加水印
         if conf.is_watermark():
             add_mark(os.path.join(path, poster_path), os.path.join(path, thumb_path), cn_sub, leak, uncensored,
