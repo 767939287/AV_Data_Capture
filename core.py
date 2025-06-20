@@ -993,13 +993,6 @@ def core_main(movie_path, number_th, oCC, specified_source=None, specified_url=N
             except:
                 pass
 
-        # Move subtitles
-        move_status = move_subtitles(movie_path, path, multi_part, number, part, leak_word, c_word, hack_word)
-        if move_status:
-            cn_sub = True
-        else:
-            cn_sub = cn_sub or download_subtitles(movie_path, path, multi_part, number, part, leak_word, c_word, hack_word)
-
         # 裁剪图
         cutImage(imagecut, path, thumb_path, poster_path, bool(conf.face_uncensored_only() and not uncensored))
 
@@ -1014,6 +1007,13 @@ def core_main(movie_path, number_th, oCC, specified_source=None, specified_url=N
         if conf.is_watermark():
             add_mark(os.path.join(path, poster_path), os.path.join(path, thumb_path), cn_sub, leak, uncensored,
                      hack, _4k, iso)
+
+        # Move subtitles
+        move_status = move_subtitles(movie_path, path, multi_part, number, part, leak_word, c_word, hack_word)
+        if move_status:
+            cn_sub = True
+        else:
+            cn_sub = cn_sub or download_subtitles(movie_path, path, multi_part, number, part, leak_word, c_word, hack_word)
 
         # 最后输出.nfo元数据文件，以完成.nfo文件创建作为任务成功标志
         print_files(path, leak_word, c_word, json_data.get('naming_rule'), part, cn_sub, json_data, movie_path, tag,
