@@ -1084,11 +1084,11 @@ def core_main(movie_path, number_th, oCC, specified_source=None, specified_url=N
         # if multi_part and conf.jellyfin_multi_part_fanart():
         #     linkImage(path, number_th, part, leak_word, c_word, hack_word, ext)
 
-        # # 最后输出.nfo元数据文件，以完成.nfo文件创建作为任务成功标志
-        # print_files(path, leak_word, c_word, json_data.get('naming_rule'), part, cn_sub, json_data, movie_path,
-        #             tag, json_data.get('actor_list'), liuchu, uncensored, hack, hack_word, _4k, fanart_path,
-        #             poster_path,
-        #             thumb_path, iso)
+        # 最后输出.nfo元数据文件，以完成.nfo文件创建作为任务成功标志
+        print_files(path, leak_word, c_word, json_data.get('naming_rule'), part, cn_sub, json_data, movie_path,
+                    tag, json_data.get('actor_list'), liuchu, uncensored, hack, hack_word, _4k, fanart_path,
+                    poster_path,
+                    thumb_path, iso)
 
     elif conf.main_mode() == 4:
         path = str(Path(movie_path).parent)
