@@ -123,8 +123,8 @@ def getStoryline_airav(number, debug, proxies, verify):
         if not res:
             raise ValueError(f"get_html_by_session('{url}') failed")
         lx = etree.fromstring(res.text, etree.HTMLParser(recover=True))
-        urls = lx.xpath('//div[@class="resultcontent"]/ul/li/div/a[@class="ga_click"]/@href')
-        txts = lx.xpath('//div[@class="resultcontent"]/ul/li/div/a[@class="ga_click"]/h3[@class="one_name ga_name"]/text()')
+        urls = lx.xpath('//div[@class="oneVideo-top"]/a/@href')
+        txts = lx.xpath('//div[@class="oneVideo-body"]/h5/text()')
         detail_url = None
         for txt, url in zip(txts, urls):
             if re.search(number, txt, re.I):
@@ -217,8 +217,8 @@ def getStoryline_avno1(number, debug, proxies, verify):  # 获取剧情介绍 �
         url = f'http://{site}/cn/search.php?kw_type=key&kw={number}'
         data = httprequest.get_html_by_scraper(url, proxies=proxies, verify=verify)
         lx = etree.fromstring(data, etree.HTMLParser(recover=True))
-        descs = lx.xpath('//div[@class="type_movie"]/div/ul/li/div/@data-description')
-        titles = lx.xpath('//div[@class="type_movie"]/div/ul/li/div/a/h3/text()')
+        descs = lx.xpath('//@data-description')
+        titles = lx.xpath('//a[@class="ga_name"]/text()')
         if not descs or not len(descs):
             print(f"number not found")
         partial_num = bool(re.match(r'\d{6}[\-_]\d{2,3}', number))
