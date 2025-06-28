@@ -216,7 +216,7 @@ def getStoryline_avno1(number, debug, proxies, verify):  # 获取剧情介绍 �
     try:
         site = secrets.choice(['avno1.cc', '1768av.club', '2nine.net', 'av999.tv',
                                'hotav.biz', 'javhq.tv',
-                               'www.hdsex.cc', , 'www.xxx18.cc',])
+                               'www.hdsex.cc', 'www.xxx18.cc',])
         url = f'http://{site}/cn/search.php?kw_type=key&kw={number}'
         data = httprequest.get_html_by_scraper(url, proxies=proxies, verify=verify)
         lx = etree.fromstring(data, etree.HTMLParser(recover=True))
