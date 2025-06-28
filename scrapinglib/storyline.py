@@ -138,6 +138,9 @@ def getStoryline_airav(number, debug, proxies, verify):
         detail_page = etree.fromstring(detail_data.text, etree.HTMLParser(recover=True))
         titles = detail_page.xpath('//div[@class="video-title my-3"]/h1/text()')
         title = str(titles[0]).strip()
+        # 添加排除"破坏版"关键字的逻辑
+        if "破坏版" in title or "破壞版" in title:
+            raise ValueError(f"title contains excluded keyword: {title}")
         if number not in title:
             raise ValueError(f"page number ->[{number}] not match")
         desc_list = detail_page.xpath('//div[@class="video-info"]/p[@class="my-3"]/text()')
@@ -145,7 +148,7 @@ def getStoryline_airav(number, debug, proxies, verify):
         return desc
     except Exception as e:
         if debug:
-            print(f"[-]MP getStoryline_airav {url} Error: {e},number [{number}].")
+            print(f"[-]MP getStoryline_airav {url} Error: {e}, number [{number}].")
         pass
     return None
 
@@ -213,7 +216,7 @@ def getStoryline_avno1(number, debug, proxies, verify):  # 获取剧情介绍 �
     try:
         site = secrets.choice(['avno1.cc', '1768av.club', '2nine.net', 'av999.tv',
                                'hotav.biz', 'javhq.tv',
-                               'www.hdsex.cc', 'www.porn18.cc', 'www.xxx18.cc',])
+                               'www.hdsex.cc', , 'www.xxx18.cc',])
         url = f'http://{site}/cn/search.php?kw_type=key&kw={number}'
         data = httprequest.get_html_by_scraper(url, proxies=proxies, verify=verify)
         lx = etree.fromstring(data, etree.HTMLParser(recover=True))
@@ -226,8 +229,7 @@ def getStoryline_avno1(number, debug, proxies, verify):  # 获取剧情介绍 �
             page_number = title[title.rfind(' ')+1:].strip()
             if not partial_num:
                 # 不选择title中带破坏版和破坏版的简介
-                # if re.match(f'^{number}$', page_number, re.I) and title.rfind('破坏版') == -1:
-                if re.match(f'^{number}$', page_number, re.I) and title.rfind('破坏版') == -1 and title.rfind('破壞版') == -1:
+                 if re.match(f'^{number}$', page_number, re.I) and title.rfind('破坏版') == -1:
                     return desc.strip()
             elif re.search(number, page_number, re.I):
                 return desc.strip()

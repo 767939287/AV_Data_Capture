@@ -44,7 +44,7 @@ def argparse_function(ver: str) -> typing.Tuple[str, str, str, str, bool, bool, 
     parser.add_argument("-m", "--main-mode", default='', nargs='?',
                         help="Main mode. 1:Scraping 2:Organizing 3:Scraping in analysis folder")
     parser.add_argument("-n", "--number", default='', nargs='?', help="Custom file number of single movie file.")
-    # parser.add_argument("-C", "--config", default='config.ini', nargs='?', help="The config file Path.")
+    parser.add_argument("-C", "--config", default='config.ini', nargs='?', help="The config file Path.")
     parser.add_argument("-L", "--link-mode", default='', nargs='?',
                         help="Create movie file link. 0:moving movie file, do not create link 1:soft link 2:try hard link first")
     default_logdir = str(Path.home() / '.mlogs')
