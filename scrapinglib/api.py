@@ -213,10 +213,10 @@ class Scraping:
                     json_data['actor'] = "Anonymous"
 
         # 当刮削来自javbus的影片时，使用dmm封面而不是javbus的
-        if 'source' in json_data and json_data['source'] == 'javbus':
-            cover_url = json_data['extrafanart'][0]
-            if cover_url.endswith('jp-1.jpg'):
-                json_data['cover'] = cover_url.replace('jp-1.jpg', 'pl.jpg')
+        # if 'source' in json_data and json_data['source'] == 'javbus':
+        #     cover_url = json_data['extrafanart'][0]
+        #     if cover_url.endswith('jp-1.jpg'):
+        #         json_data['cover'] = cover_url.replace('jp-1.jpg', 'pl.jpg')
 
 
         return json_data

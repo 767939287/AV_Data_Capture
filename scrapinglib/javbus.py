@@ -47,7 +47,7 @@ class Javbus(Parser):
                     newnumber = "DV-1195_2010-10-08"
                 if number == "BKD-003" :
                     newnumber = "BKD-003_2009-09-05"                     
-                self.detailurl = 'https://www.javbus.com/' + newnumber
+                self.detailurl = 'https://www.cdnbus.ink/' + newnumber
                 self.htmlcode = self.getHtml(self.detailurl)
             except:
                 mirror_url = "https://www." + secrets.choice([
@@ -74,7 +74,7 @@ class Javbus(Parser):
         if self.specifiedUrl:
             self.detailurl = self.specifiedUrl
         else:
-            self.detailurl = 'https://www.javbus.com/' + w_number
+            self.detailurl = 'https://www.cdnbus.ink/' + w_number
         self.htmlcode = self.getHtml(self.detailurl)
         if self.htmlcode == 404:
             return 404
@@ -103,7 +103,7 @@ class Javbus(Parser):
             return self.getTreeElement(htmltree, self.expr_studio)
 
     def getCover(self, htmltree):
-        return urljoin("https://www.javbus.com", super().getCover(htmltree))
+        return urljoin("https://www.cdnbus.ink", super().getCover(htmltree))
 
     def getRuntime(self, htmltree):
         return super().getRuntime(htmltree).strip(" ['']分鐘")
@@ -123,7 +123,7 @@ class Javbus(Parser):
             if "nowprinting.gif" in p:
                 continue
             t = i.attrib['title']
-            d[t] = urljoin("https://www.javbus.com", p)
+            d[t] = urljoin("https://www.cdnbus.ink", p)
         return d
 
     def getDirector(self, htmltree):
