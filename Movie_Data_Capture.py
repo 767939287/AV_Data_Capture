@@ -12,6 +12,7 @@ import signal
 import platform
 import config
 
+
 from datetime import datetime, timedelta
 from lxml import etree
 from pathlib import Path
@@ -43,7 +44,7 @@ def argparse_function(ver: str) -> typing.Tuple[str, str, str, str, bool, bool, 
     parser.add_argument("-m", "--main-mode", default='', nargs='?',
                         help="Main mode. 1:Scraping 2:Organizing 3:Scraping in analysis folder")
     parser.add_argument("-n", "--number", default='', nargs='?', help="Custom file number of single movie file.")
-    parser.add_argument("-Q", "--config", default='config.ini', nargs='?', help="The config file Path.")
+    # parser.add_argument("-C", "--config", default='config.ini', nargs='?', help="The config file Path.")
     parser.add_argument("-L", "--link-mode", default='', nargs='?',
                         help="Create movie file link. 0:moving movie file, do not create link 1:soft link 2:try hard link first")
     default_logdir = str(Path.home() / '.mlogs')
@@ -444,6 +445,7 @@ def rm_empty_folder(path):
             pass
 
 
+def create_data_and_move(movie_path: str, zero_op: bool, no_net_op: bool, oCC):
     # Normalized number, eg: 111xxx-222.mp4 -> xxx-222.mp4
     debug = config.getInstance().debug()
     n_number = get_number(debug, os.path.basename(movie_path))
@@ -484,6 +486,7 @@ def rm_empty_folder(path):
             except Exception as err:
                 print('[!]', err)
 
+
 def create_data_and_move_with_custom_number(file_path: str, custom_number, oCC, specified_source, specified_url):
     conf = config.getInstance()
     file_name = os.path.basename(file_path)
@@ -515,7 +518,7 @@ def main(args: tuple) -> Path:
     conf = config.getInstance()
     main_mode = conf.main_mode()
     folder_path = ""
-    if main_mode not in (1, 2, 3, 4):
+    if main_mode not in (1, 2, 3):
         print(f"[-]Main mode must be 1 or 2 or 3! You can run '{os.path.basename(sys.argv[0])} --help' for more help.")
         os._exit(4)
 
@@ -626,11 +629,16 @@ def main(args: tuple) -> Path:
         count_all = str(len(movie_list))
         print('[+]Find', count_all, 'movies.')
         print('[*]======================================================')
-        stop_count = conf.stop_counter()        
+        stop_count = conf.stop_counter()
+
         if stop_count < 1:
             stop_count = 999999
         else:
             count_all = str(min(len(movie_list), stop_count))
+
+
+
+
         for movie_path in movie_list:  # 遍历电影列表 交给core处理
 
             count = count + 1
@@ -639,12 +647,27 @@ def main(args: tuple) -> Path:
                                             time.strftime("%H:%M:%S")))
             create_data_and_move(movie_path, zero_op, no_net_op, oCC)
 
+
+
+
+
+
+
+
+
+
+
+
             if count >= stop_count:
                 print("[!]Stop counter triggered!")
                 break
             sleep_seconds = random.randint(conf.sleep(), conf.sleep() + 2)
             time.sleep(sleep_seconds)
-    
+
+
+
+
+
     if conf.del_empty_folder() and not zero_op:
         rm_empty_folder(conf.success_folder())
         rm_empty_folder(conf.failed_folder())
