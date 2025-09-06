@@ -633,14 +633,11 @@ def main(args: tuple) -> Path:
             count_all = str(min(len(movie_list), stop_count))
         for movie_path in movie_list:  # 遍历电影列表 交给core处理
 
-            while threading.active_count() > 3 :
-                sleep_seconds = random.randint(conf.sleep(), conf.sleep() + 2)
-                time.sleep(sleep_seconds)
-
             count = count + 1
             percentage = str(count / int(count_all) * 100)[:4] + '%'
             print('[!] {:>30}{:>21}'.format('- ' + percentage + ' [' + str(count) + '/' + count_all + '] -',
                                             time.strftime("%H:%M:%S")))
+            create_data_and_move(movie_path, zero_op, no_net_op, oCC)
 
             if count >= stop_count:
                 print("[!]Stop counter triggered!")
