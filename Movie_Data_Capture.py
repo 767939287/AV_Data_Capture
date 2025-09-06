@@ -11,7 +11,6 @@ import urllib3
 import signal
 import platform
 import config
-import threading
 
 from datetime import datetime, timedelta
 from lxml import etree
@@ -445,7 +444,6 @@ def rm_empty_folder(path):
             pass
 
 
-def create_data_and_move(movie_path: str, zero_op: bool, no_net_op: bool, oCC, thread_list):
     # Normalized number, eg: 111xxx-222.mp4 -> xxx-222.mp4
     debug = config.getInstance().debug()
     n_number = get_number(debug, os.path.basename(movie_path))
@@ -485,7 +483,6 @@ def create_data_and_move(movie_path: str, zero_op: bool, no_net_op: bool, oCC, t
                 moveFailedFolder(movie_path)
             except Exception as err:
                 print('[!]', err)
-    thread_list.remove(threading.current_thread().name)
 
 def create_data_and_move_with_custom_number(file_path: str, custom_number, oCC, specified_source, specified_url):
     conf = config.getInstance()
@@ -552,7 +549,7 @@ def main(args: tuple) -> Path:
         print('[!]CmdLine:', " ".join(sys.argv[1:]))
     print('[+]Main Working mode ## {}: {} ## {}{}{}'
           .format(*(main_mode, ['Scraping', 'Organizing', 'Scraping in analysis folder'][main_mode - 1],
-                    "" if conf.multi_threading() == 0 else ", multi_threading on",
+                    "" if not conf.multi_threading() else ", multi_threading on",
                     "" if conf.nfo_skip_days() == 0 else f", nfo_skip_days={conf.nfo_skip_days()}",
                     "" if conf.stop_counter() == 0 else f", stop_counter={conf.stop_counter()}"
                     ) if not single_file_path else ('-', 'Single File', '', '', ''))
@@ -634,10 +631,6 @@ def main(args: tuple) -> Path:
             stop_count = 999999
         else:
             count_all = str(min(len(movie_list), stop_count))
-
-
-        thread_stop = conf.multi_threading()
-        thread_list = []
         for movie_path in movie_list:  # 遍历电影列表 交给core处理
 
             while threading.active_count() > 3 :
@@ -648,28 +641,12 @@ def main(args: tuple) -> Path:
             percentage = str(count / int(count_all) * 100)[:4] + '%'
             print('[!] {:>30}{:>21}'.format('- ' + percentage + ' [' + str(count) + '/' + count_all + '] -',
                                             time.strftime("%H:%M:%S")))
-                
-            if thread_stop > 0 :
-                while len(thread_list) >= thread_stop :
-                    sleep_seconds = random.randint(conf.sleep(), conf.sleep() + 2)
-                    time.sleep(sleep_seconds)
-                
-                t = threading.Thread(target=create_data_and_move, args=(movie_path, zero_op, no_net_op, oCC, thread_list))
-                thread_list.append(t.name)
-                t.start()
-            else :
-                thread_list.append(threading.current_thread().name)
-                create_data_and_move(movie_path, zero_op, no_net_op, oCC, thread_list)
 
             if count >= stop_count:
                 print("[!]Stop counter triggered!")
                 break
             sleep_seconds = random.randint(conf.sleep(), conf.sleep() + 2)
             time.sleep(sleep_seconds)
-
-    while len(thread_list) > 0 :
-        sleep_seconds = random.randint(conf.sleep(), conf.sleep() + 2)
-        time.sleep(sleep_seconds)
     
     if conf.del_empty_folder() and not zero_op:
         rm_empty_folder(conf.success_folder())
