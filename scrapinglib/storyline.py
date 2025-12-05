@@ -229,7 +229,7 @@ def getStoryline_avno1(number, debug, proxies, verify):  # 获取剧情介绍 �
             page_number = title[title.rfind(' ')+1:].strip()
             if not partial_num:
                 # 不选择title中带破坏版和破坏版的简介
-                 if re.match(f'^{number}$', page_number, re.I) and title.rfind('破坏版') == -1:
+                 if re.match(f'^{number}$', page_number, re.I) and not re.search(r'破解版|破坏版', title):
                     return desc.strip()
             elif re.search(number, page_number, re.I):
                 return desc.strip()
