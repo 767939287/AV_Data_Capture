@@ -139,7 +139,7 @@ def getStoryline_airav(number, debug, proxies, verify):
         titles = detail_page.xpath('//div[@class="video-title my-3"]/h1/text()')
         title = str(titles[0]).strip()
         # 添加排除"破坏版"关键字的逻辑
-        if any(keyword in title for keyword in ["破坏版", "破壞版", "破解版"]):
+        if "破坏版" in title or "破壞版" in title or "破解版" in title or "马赛克破解版" in title or "馬賽克破解版" in title :
             raise ValueError(f"title contains excluded keyword: {title}")
         if number not in title:
             raise ValueError(f"page number ->[{number}] not match")
@@ -229,7 +229,7 @@ def getStoryline_avno1(number, debug, proxies, verify):  # 获取剧情介绍 �
             page_number = title[title.rfind(' ')+1:].strip()
             if not partial_num:
                 # 不选择title中带破坏版和破坏版的简介
-                 if re.match(f'^{number}$', page_number, re.I) and not re.search(r'破解版|破坏版|破壞版', title):
+                 if re.match(f'^{number}$', page_number, re.I) and not re.search(r'破解版|破坏版|破壞版|马赛克破解版|馬賽克破解版', title):
                     return desc.strip()
             elif re.search(number, page_number, re.I):
                 return desc.strip()
