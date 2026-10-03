@@ -487,6 +487,40 @@ class Config:
         except:
             return "fanza,avno1,airavwiki"
 
+    def storyline_timeout(self) -> dict:
+        """各剧情简介站点的请求超时(秒)。[storyline] timeout。
+
+        写法（逗号分隔，单位秒，仅接受正整数）：
+          - 直接写数字:          timeout = 15              # 所有站点统一 15 秒(存入 'default')
+          - 单独指定某站点:       timeout = fanza=20,airav=10 # 只覆盖列出的站点
+          - 数字 + 单站点混写:    timeout = 15,fanza=20      # 默认 15，fanza 单独 20
+        说明：不带 '=' 的纯数字视为所有站点的默认超时(键名 'default')，无需写 default=。
+        未配置 timeout 项时返回空 dict（各站点使用代码内默认超时，行为与升级前一致）。
+        返回值示例: {'default': 15, 'fanza': 20, 'airav': 10}
+        """
+        result = {}
+        try:
+            raw = self.conf.get("storyline", "timeout", fallback="")
+        except Exception:
+            return result
+        if not isinstance(raw, str) or not raw.strip():
+            return result
+        for item in raw.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            if "=" not in item:
+                # 纯数字 → 所有站点的默认超时
+                if item.isdigit() and int(item) > 0:
+                    result["default"] = int(item)
+                continue
+            site, _, val = item.partition("=")
+            site = site.strip().lower()
+            val = val.strip()
+            if site and val.isdigit() and int(val) > 0:
+                result[site] = int(val)
+        return result
+
     def storyline_censored_site(self) -> str:
         try:
             return self.conf.get("storyline", "censored_site")

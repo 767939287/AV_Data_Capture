@@ -71,8 +71,13 @@ def getStoryline(number, title=None, sites: list = None, uncensored=None, proxie
         if s in G_registered_storyline_site and s not in r_dup:
             sort_sites.append(s)
             r_dup.add(s)
+    # 各站点请求超时(秒)：config [storyline] timeout=default=15,fanza=20,...
+    # 未单独配置的站点用 timeout['default']，都未配置则该站点为 None(使用底层默认超时)。
+    timeouts = config.getInstance().storyline_timeout()
+    default_timeout = timeouts.get("default")
     # 用 list 而非生成器传给线程池，避免生成器+线程池潜在的顺序歧义
-    mp_args = [(site, number, title, debug, proxies, verify) for site in sort_sites]
+    mp_args = [(site, number, title, debug, proxies, verify, timeouts.get(site, default_timeout))
+               for site in sort_sites]
     cores = min(len(sort_sites), os.cpu_count())
     if cores == 0:
         return ''
@@ -112,25 +117,25 @@ def getStoryline(number, title=None, sites: list = None, uncensored=None, proxie
 
 
 def getStoryline_mp(args):
-    (site, number, title, debug, proxies, verify) = args
+    (site, number, title, debug, proxies, verify, timeout) = args
     start_time = time.time()
     storyline = None
     if not isinstance(site, str):
         return storyline
     elif site == "airavwiki":
-        storyline = getStoryline_airavwiki(number, debug, proxies, verify)
+        storyline = getStoryline_airavwiki(number, debug, proxies, verify, timeout)
     elif site == "airav":
-        storyline = getStoryline_airav(number, debug, proxies, verify)
+        storyline = getStoryline_airav(number, debug, proxies, verify, timeout)
     elif site == "avno1":
-        storyline = getStoryline_avno1(number, debug, proxies, verify)
+        storyline = getStoryline_avno1(number, debug, proxies, verify, timeout)
     elif site == "xcity":
-        storyline = getStoryline_xcity(number, debug, proxies, verify)
+        storyline = getStoryline_xcity(number, debug, proxies, verify, timeout)
     elif site == "58avgo":
-        storyline = getStoryline_58avgo(number, debug, proxies, verify)
+        storyline = getStoryline_58avgo(number, debug, proxies, verify, timeout)
     elif site == "fanza":
-        storyline = getStoryline_fanza(number, debug, proxies, verify)
+        storyline = getStoryline_fanza(number, debug, proxies, verify, timeout)
     elif site == "mgstage":
-        storyline = getStoryline_mgstage(number, debug, proxies, verify)
+        storyline = getStoryline_mgstage(number, debug, proxies, verify, timeout)
     if debug:
         print("[!]MP 线程[{}]运行{:.3f}秒，结束于{}返回结果: {}".format(
             site,
@@ -141,12 +146,13 @@ def getStoryline_mp(args):
     return storyline
 
 
-def getStoryline_airav(number, debug, proxies, verify):
+def getStoryline_airav(number, debug, proxies, verify, timeout=None):
+    url = ''
     try:
         site = secrets.choice(('airav.io', 'airair6.co',))
         url = f'https://{site}/searchresults.aspx?Search={number}&Type=0'
-        session = httprequest.request_session(proxies=proxies, verify=verify, retry=0)
-        res = session.get(url)
+        session = httprequest.request_session(proxies=proxies, verify=verify, retry=0, timeout=timeout)
+        res = session.get(url, timeout=timeout)
         if not res:
             raise ValueError(f"get_html_by_session('{url}') failed")
         lx = etree.fromstring(res.text, etree.HTMLParser(recover=True))
@@ -159,7 +165,7 @@ def getStoryline_airav(number, debug, proxies, verify):
                 break
         if detail_url is None:
             raise ValueError("number not found")
-        detail_data = session.get(detail_url)
+        detail_data = session.get(detail_url, timeout=timeout)
         if not detail_data.ok:
             raise ValueError(f"session.get('{detail_url}') failed")
         detail_page = etree.fromstring(detail_data.text, etree.HTMLParser(recover=True))
@@ -180,7 +186,7 @@ def getStoryline_airav(number, debug, proxies, verify):
     return None
 
 
-def getStoryline_airavwiki(number, debug, proxies, verify):
+def getStoryline_airavwiki(number, debug, proxies, verify, timeout=None):
     try:
         kwd = number[:6] if re.match(r'\d{6}[\-_]\d{2,3}', number) else number
         airavwiki = Airav()
@@ -189,6 +195,7 @@ def getStoryline_airavwiki(number, debug, proxies, verify):
         airavwiki.addtion_Javbus = False
         airavwiki.proxies = proxies
         airavwiki.verify = verify
+        airavwiki.timeout = timeout
         jsons = airavwiki.search(kwd)
         outline = json.loads(jsons).get('outline')
         return outline
@@ -199,17 +206,20 @@ def getStoryline_airavwiki(number, debug, proxies, verify):
     return ''
 
 
-def getStoryline_58avgo(number, debug, proxies, verify):
+def getStoryline_58avgo(number, debug, proxies, verify, timeout=None):
     try:
         url = 'http://58avgo.com/cn/index.aspx' + secrets.choice([
             '', '?status=3', '?status=4', '?status=7', '?status=9', '?status=10', '?status=11', '?status=12',
                 '?status=1&Sort=Playon', '?status=1&Sort=dateupload', 'status=1&Sort=dateproduce'
         ])  # 随机选一个，避免网站httpd日志中单个ip的请求太过单一
         kwd = number[:6] if re.match(r'\d{6}[\-_]\d{2,3}', number) else number
+        form_kwargs = {}
+        if timeout is not None:
+            form_kwargs["timeout"] = timeout
         result, browser = httprequest.get_html_by_form(url,
                                                        fields={'ctl00$TextBox_SearchKeyWord': kwd},
                                                        proxies=proxies, verify=verify,
-                                                       return_type='browser')
+                                                       return_type='browser', **form_kwargs)
         if not result:
             raise ValueError(f"get_html_by_form('{url}','{number}') failed")
         if f'searchresults.aspx?Search={kwd}' not in browser.url:
@@ -239,13 +249,13 @@ def getStoryline_58avgo(number, debug, proxies, verify):
     return ''
 
 
-def getStoryline_avno1(number, debug, proxies, verify):  # 获取剧情介绍 从avno1.cc取得
+def getStoryline_avno1(number, debug, proxies, verify, timeout=None):  # 获取剧情介绍 从avno1.cc取得
     try:
         site = secrets.choice(['avno1.cc', '1768av.club', '2nine.net', 'av999.tv',
                                'hotav.biz', 'javhq.tv',
                                'www.hdsex.cc', 'www.xxx18.cc',])
         url = f'http://{site}/cn/search.php?kw_type=key&kw={number}'
-        data = httprequest.get_html_by_scraper(url, proxies=proxies, verify=verify)
+        data = httprequest.get_html_by_scraper(url, proxies=proxies, verify=verify, timeout=timeout)
         lx = etree.fromstring(data, etree.HTMLParser(recover=True))
         descs = lx.xpath('//@data-description')
         titles = lx.xpath('//a[@class="ga_name"]/text()')
@@ -268,17 +278,20 @@ def getStoryline_avno1(number, debug, proxies, verify):  # 获取剧情介绍 �
     return ''
 
 
-def getStoryline_avno1OLD(number, debug, proxies, verify):  # 获取剧情介绍 从avno1.cc取得
+def getStoryline_avno1OLD(number, debug, proxies, verify, timeout=None):  # 获取剧情介绍 从avno1.cc取得
     try:
         url = 'http://www.avno1.cc/cn/' + secrets.choice(['usercenter.php?item=' +
                                                           secrets.choice(['pay_support', 'qa', 'contact', 'guide-vpn']),
                                                           '?top=1&cat=hd', '?top=1', '?cat=hd', 'porn', '?cat=jp', '?cat=us', 'recommend_category.php'
                                                           ])  # 随机选一个，避免网站httpd日志中单个ip的请求太过单一
+        form_kwargs = {}
+        if timeout is not None:
+            form_kwargs["timeout"] = timeout
         result, browser = httprequest.get_html_by_form(url,
                                                        form_select='div.wrapper > div.header > div.search > form',
                                                        fields={'kw': number},
                                                        proxies=proxies, verify=verify,
-                                                       return_type='browser')
+                                                       return_type='browser', **form_kwargs)
         if not result:
             raise ValueError(f"get_html_by_form('{url}','{number}') failed")
         s = browser.page.select('div.type_movie > div > ul > li > div')
@@ -295,13 +308,14 @@ def getStoryline_avno1OLD(number, debug, proxies, verify):  # 获取剧情介绍
     return ''
 
 
-def getStoryline_xcity(number, debug, proxies, verify):  # 获取剧情介绍 从xcity取得
+def getStoryline_xcity(number, debug, proxies, verify, timeout=None):  # 获取剧情介绍 从xcity取得
     try:
         xcityEngine = Xcity()
         xcityEngine.init()
         xcityEngine.updateCore(core=None)
         xcityEngine.proxies = proxies
         xcityEngine.verify = verify
+        xcityEngine.timeout = timeout
         jsons = xcityEngine.search(number)
         outline = json.loads(jsons).get('outline')
         return outline
@@ -312,7 +326,7 @@ def getStoryline_xcity(number, debug, proxies, verify):  # 获取剧情介绍 �
     return ''
 
 
-def getStoryline_fanza(number, debug, proxies, verify):  # 获取剧情介绍 从 FANZA/DMM 取得(日文)
+def getStoryline_fanza(number, debug, proxies, verify, timeout=None):  # 获取剧情介绍 从 FANZA/DMM 取得(日文)
     from .fanza import Fanza
     try:
         fanzaEngine = Fanza()
@@ -320,6 +334,7 @@ def getStoryline_fanza(number, debug, proxies, verify):  # 获取剧情介绍 �
         fanzaEngine.updateCore(core=None)
         fanzaEngine.proxies = proxies
         fanzaEngine.verify = verify
+        fanzaEngine.timeout = timeout
         jsons = fanzaEngine.search(number)
         if not jsons or jsons == 404:
             raise ValueError("number not found on FANZA")
@@ -332,7 +347,7 @@ def getStoryline_fanza(number, debug, proxies, verify):  # 获取剧情介绍 �
     return ''
 
 
-def getStoryline_mgstage(number, debug, proxies, verify):  # 获取剧情介绍 从 MGStage 取得(日文)
+def getStoryline_mgstage(number, debug, proxies, verify, timeout=None):  # 获取剧情介绍 从 MGStage 取得(日文)
     from .mgstage import Mgstage
     try:
         mgstageEngine = Mgstage()
@@ -340,6 +355,7 @@ def getStoryline_mgstage(number, debug, proxies, verify):  # 获取剧情介绍 
         mgstageEngine.updateCore(core=None)
         mgstageEngine.proxies = proxies
         mgstageEngine.verify = verify
+        mgstageEngine.timeout = timeout
         jsons = mgstageEngine.search(number)
         if not jsons or jsons == 404:
             raise ValueError("number not found on MGStage")

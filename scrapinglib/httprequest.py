@@ -104,6 +104,8 @@ def request_session(cookies=None, ua: str = None, retry: int = 3, timeout: int =
     """
     keep-alive
     """
+    if timeout is None:  # 未指定超时则回退默认，避免 TimeoutHTTPAdapter 收到 None
+        timeout = G_DEFAULT_TIMEOUT
     session = create_scraper(browser={'custom': ua or G_USER_AGENT, })
     if retry > 0:
         retries = Retry(total=retry, connect=retry, backoff_factor=1,
@@ -124,6 +126,8 @@ def request_session(cookies=None, ua: str = None, retry: int = 3, timeout: int =
 def get_html_by_form(url, form_select: str = None, fields: dict = None, cookies: dict = None, ua: str = None,
                      return_type: str = None, encoding: str = None,
                      retry: int = 3, timeout: int = G_DEFAULT_TIMEOUT, proxies=None, verify=None):
+    if timeout is None:
+        timeout = G_DEFAULT_TIMEOUT
     session = requests.Session()
     if isinstance(cookies, dict) and len(cookies):
         requests.utils.add_dict_to_cookiejar(session.cookies, cookies)
@@ -168,6 +172,8 @@ def get_html_by_form(url, form_select: str = None, fields: dict = None, cookies:
 def get_html_by_scraper(url: str = None, cookies: dict = None, ua: str = None, return_type: str = None,
                         encoding: str = None, retry: int = 3, proxies=None, extra_headers: dict = None, timeout: int = G_DEFAULT_TIMEOUT, verify=None):
 
+    if timeout is None:
+        timeout = G_DEFAULT_TIMEOUT
     session = create_scraper(browser={'custom': ua or G_USER_AGENT, })
     headers = {"User-Agent": ua or G_USER_AGENT}
     if extra_headers != None:

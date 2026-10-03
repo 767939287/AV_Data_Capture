@@ -56,6 +56,9 @@ class Parser:
         self.cookies = None
         self.morestoryline = False
         self.specifiedUrl = None
+        # 请求超时(秒)，None 表示使用 httprequest 内部默认值。
+        # 由 storyline 等调用方按站点配置自行覆盖（见 storyline.py）。
+        self.timeout = None
         self.extraInit()
 
     def extraInit(self):
@@ -122,11 +125,13 @@ class Parser:
         """ 访问网页
 
         retry: 请求失败重试次数。探测类请求可传较小值(如1)以加快失败返回。
-        timeout: 覆盖默认超时(秒)，探测类请求可传较小值避免长时间等待。
+        timeout: 覆盖默认超时(秒)。未显式传入时使用实例的 self.timeout
+                 (由 storyline 按站点配置注入)，两者都为空则用 httprequest 默认值。
         """
         kwargs = {}
-        if timeout is not None:
-            kwargs["timeout"] = timeout
+        eff_timeout = timeout if timeout is not None else getattr(self, "timeout", None)
+        if eff_timeout is not None:
+            kwargs["timeout"] = eff_timeout
         resp = httprequest.get(url, cookies=self.cookies, proxies=self.proxies, extra_headers=self.extraheader, verify=self.verify, return_type=type, retry=retry, **kwargs)
         if '<title>404 Page Not Found' in resp \
                 or '<title>未找到页面' in resp \
@@ -136,10 +141,16 @@ class Parser:
             return 404
         return resp
 
-    def get_by_scraper(self, url, type=None, retry=0):
+    def get_by_scraper(self, url, type=None, retry=0, timeout=None):
         """ 访问网页
+
+        timeout: 未显式传入时使用实例的 self.timeout（由 storyline 按站点配置注入）。
         """
-        resp = httprequest.get_html_by_scraper(url, cookies=self.cookies, proxies=self.proxies, verify=self.verify, return_type=type, retry=retry)
+        kwargs = {}
+        eff_timeout = timeout if timeout is not None else getattr(self, "timeout", None)
+        if eff_timeout is not None:
+            kwargs["timeout"] = eff_timeout
+        resp = httprequest.get_html_by_scraper(url, cookies=self.cookies, proxies=self.proxies, verify=self.verify, return_type=type, retry=retry, **kwargs)
         if '<title>404 Page Not Found' in resp \
                 or '<title>未找到页面' in resp \
                 or '404 Not Found' in resp \
