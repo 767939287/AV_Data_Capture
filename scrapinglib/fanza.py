@@ -16,6 +16,13 @@ class Fanza(Parser):
     expr_actor = "//td[contains(text(),'出演者')]/following-sibling::td/span/a/text()"
     # expr_cover = './/head/meta[@property="og:image"]/@content'
     # expr_extrafanart = '//a[@name="sample-image"]/img/@src'
+    # 简介选择器（多个，按可靠性从高到低依次回退）：
+    #  - expr_outline3 对应 MDCx MonoParser.outline 采用的
+    #    ".wrapper-detailContents~div>p.mg-b20::text"（新版 DMM/FANZA 详情页简介所在），最可靠，放首位；
+    #  - expr_outline / expr_outline2 为旧版布局兜底；
+    #  - expr_outline4 为 rental 类布局（MDCx RentalParser: ".clear p::text"）。
+    #  注意：这些选择器都会匹配到【多个】文本节点（简介按 <br>/段落拆开），
+    #        解析时必须取全部并拼接，否则只会保留首行（见 _joinOutlineNodes）。
     expr_outline = "//div[@class='mg-b20 lh4']/text()"
     expr_outline2 = "//div[@class='mg-b20 lh4']//p/text()"
     expr_outline3 = "//div[contains(@class,'wrapper-detailContents')]/following-sibling::div/p[contains(@class,'mg-b20')]/text()"
@@ -206,27 +213,75 @@ class Fanza(Parser):
             pass
         return result
 
+    # 简介选择器里出现的「配信方法...」为 DMM 的固定占位文案，需剔除
+    _OUTLINE_PLACEHOLDER = "※ 配信方法によって収録内容が異なる場合があります。"
+
+    def _joinOutlineNodes(self, htmltree, expr):
+        """取 expr 匹配到的【全部】文本节点并拼接为完整简介。
+
+        FANZA 详情页的简介常由多个 /text() 节点组成（按 <br> 或分段拆开），
+        旧实现用 getTreeElement(index=0) 只取第 0 个，导致只刮到「一行」。
+        这里改用 getTreeAll 取出所有节点，逐个清理后拼接（用换行还原段落）。
+        """
+        try:
+            nodes = self.getTreeAll(htmltree, expr)
+        except Exception:
+            return ''
+        if not nodes:
+            return ''
+        parts = []
+        for node in nodes:
+            # node 可能是字符串(文本节点)，也可能是元素；统一转成字符串
+            text = node if isinstance(node, str) else (node.text or '')
+            text = (text or '').replace('\r', '').replace('\n', '').strip()
+            if not text:
+                continue
+            if text == self._OUTLINE_PLACEHOLDER:
+                continue
+            parts.append(text)
+        # 拼接：相邻段落用换行分隔，便于阅读；同一段碎片会被 <br> 拆成多节点也正好分行
+        return '\n'.join(parts).strip()
+
     def _getFanzaOutline(self, htmltree):
-        """从 FANZA/DMM 详情页解析（日文）剧情简介，多选择器依次回退。"""
-        # 1) digital/video 页面优先从 JSON-LD 里取 description
+        """从 FANZA/DMM 详情页解析（日文）剧情简介，多来源择优。
+
+        说明（参考 MDCx）：
+          - MDCx 的 DigitalParser 用 JSON-LD 的 description；MonoParser 用
+            「.wrapper-detailContents~div>p.mg-b20::text」选择器拼接。
+          - 本函数两者都尝试，并【取更完整者】：JSON-LD description 有时只是
+            短摘要（仅一行），而 p.mg-b20 段落拼接往往才是完整简介，反之亦然。
+            因此不再"命中 JSON-LD 即返回"，而是取出 选择器拼接结果 与 JSON-LD
+            结果，择更长者返回，避免只刮到一行。
+        注意：选择器会匹配到多个文本节点，必须取全部再拼接（见 _joinOutlineNodes）。
+        """
+        # A) 选择器拼接结果（新版页面 p.mg-b20 最可靠，放首位；其余为旧版/rental 兜底）
+        selector_result = ''
+        for expr in (self.expr_outline3, self.expr_outline, self.expr_outline2, self.expr_outline4):
+            selector_result = self._joinOutlineNodes(htmltree, expr)
+            if selector_result:
+                break
+
+        # B) JSON-LD description（digital/流媒体页常见，通常是完整单段，但有时偏短）
+        jsonld_result = ''
         try:
             json_text = self.getTreeElement(htmltree, '//script[@type="application/ld+json"]/text()')
             if json_text:
                 data = json.loads(json_text)
                 desc = data.get("description") if isinstance(data, dict) else None
                 if isinstance(desc, str) and desc.strip():
-                    return desc.strip()
+                    jsonld_result = desc.strip()
         except Exception:
             pass
-        # 2) 依次尝试各站点布局的详情页简介选择器
-        for expr in (self.expr_outline, self.expr_outline2, self.expr_outline3, self.expr_outline4):
-            try:
-                result = self.getTreeElement(htmltree, expr).replace("\n", "").strip()
-            except Exception:
-                result = ''
-            if result and "※ 配信方法によって収録内容が異なる場合があります。" != result:
-                return result
-        # 3) 回退到 og:description
+
+        # C) 取更完整者：优先长文本（简介越完整越长），等长时用选择器结果。
+        if selector_result and jsonld_result:
+            return selector_result if len(selector_result) >= len(jsonld_result) else jsonld_result
+        if selector_result:
+            return selector_result
+        if jsonld_result:
+            return jsonld_result
+
+        # D) 最后回退到 og:description
         try:
             result = self.getTreeElement(htmltree, self.expr_outline_og).replace("\n", "").strip()
         except Exception:
