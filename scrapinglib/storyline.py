@@ -10,6 +10,7 @@ import re
 import time
 import secrets
 import builtins
+import multiprocessing
 import config
 
 from urllib import parse
@@ -71,12 +72,20 @@ def getStoryline(number, title=None, sites: list = None, uncensored=None, proxie
         if s in G_registered_storyline_site and s not in r_dup:
             sort_sites.append(s)
             r_dup.add(s)
-    # 各站点请求超时(秒)：config [storyline] timeout=default=15,fanza=20,...
-    # 未单独配置的站点用 timeout['default']，都未配置则该站点为 None(使用底层默认超时)。
+    # 各站点「整体超时」(秒)：config [storyline] timeout=15 或 fanza=20,airav=10
+    # 语义为该站点「整个刮削流程」的最长耗时(方案2)：超过则放弃该站(结果记空)，由其他站点顶上。
+    # 未单独配置的站点用 timeout['default']；都未配置则为 None → 不设整体超时(等其自然跑完)。
+    # 注意：该值同时作为该站每次底层 HTTP 请求的超时(见 getStoryline_mp 透传)，双保险。
     timeouts = config.getInstance().storyline_timeout()
     default_timeout = timeouts.get("default")
+
+    def _site_total_timeout(site):
+        t = timeouts.get(site, default_timeout)
+        return t if isinstance(t, int) and t > 0 else None
+
+    site_total_timeout = {site: _site_total_timeout(site) for site in sort_sites}
     # 用 list 而非生成器传给线程池，避免生成器+线程池潜在的顺序歧义
-    mp_args = [(site, number, title, debug, proxies, verify, timeouts.get(site, default_timeout))
+    mp_args = [(site, number, title, debug, proxies, verify, _site_total_timeout(site))
                for site in sort_sites]
     cores = min(len(sort_sites), os.cpu_count())
     if cores == 0:
@@ -85,8 +94,14 @@ def getStoryline(number, title=None, sites: list = None, uncensored=None, proxie
     if debug:
         # 明确打印实际生效的优先级顺序，便于核对 config 是否按预期生效
         print(f'[!]Storyline sites priority order: {sort_sites}')
-    with ThreadPool(cores) if run_mode > 0 else noThread() as pool:
-        results = pool.map(getStoryline_mp, mp_args)
+        eff = {k: v for k, v in site_total_timeout.items() if v}
+        if eff:
+            print(f'[!]Storyline site total timeout: {eff}')
+    if run_mode > 0:
+        results = _run_threadpool_with_total_timeout(cores, mp_args, sort_sites, site_total_timeout, debug)
+    else:
+        # 顺序执行(单线程)，同样对每个站点应用整站整体超时，避免某站卡死拖住后续站点。
+        results = _run_threadpool_with_total_timeout(1, mp_args, sort_sites, site_total_timeout, debug)
     sel = ''
 
     prefer_jp = config.getInstance().storyline_prefer_jp()
@@ -114,6 +129,56 @@ def getStoryline(number, title=None, sites: list = None, uncensored=None, proxie
     if debug:
         print(s)
     return sel
+
+
+def _run_threadpool_with_total_timeout(cores, mp_args, sort_sites, site_total_timeout, debug):
+    """线程池并发执行各站点，支持对每个站点分别设置“整站整体超时”(方案2)。
+
+    参数:
+      cores:             线程数
+      mp_args:           每个站点的参数元组列表(与 sort_sites 一一对应)
+      sort_sites:        站点名列表(保持顺序)
+      site_total_timeout: {站点名: 整体超时秒数或 None}。值为正整数时对该站应用整体超时；
+                         为 None 时不对该站设整体超时，等其自然返回。
+      debug:             是否打印调试信息
+
+    返回:
+      与 sort_sites 顺序一致的 results 列表；整体超时的站点其结果为 None。
+
+    语义:
+      “整体超时”指该站点从开始到返回的整段刮削流程总时长上限(含多次请求与重试)，
+      而非单次 HTTP 请求超时。超时即放弃该站结果(记 None)，由其他站点顶上，
+      从而避免某个站点卡死拖慢整体 storyline 获取。
+
+    实现要点:
+      用 apply_async 为每个站点单独提交并拿到独立的 AsyncResult，再按站点逐个
+      result.get(timeout)。这样“整体超时”才是针对每个站点各自计时的：
+        - 配了整体超时的站点：最多等 N 秒，超时则该项记 None，继续处理其它站点；
+        - 未配的站点：result.get(timeout=None) 一直等其完成。
+      (若用 map_async().get(timeout) 会变成等“全部任务”完成，无法按站点分别计时。)
+      注意：超时只是“不再等待”，对应线程仍在后台运行，会在完成后自然结束，
+            不影响本次 storyline 结果与程序退出。
+    """
+    # multiprocessing.pool 的 AsyncResult.get 超时抛 multiprocessing.TimeoutError，
+    # 在 Python 3.11+ 其即为内建 TimeoutError，但旧版本两者不同，这里一并兼容捕获。
+    _TimeoutErrors = (TimeoutError,) if multiprocessing.TimeoutError is TimeoutError else (
+        TimeoutError, multiprocessing.TimeoutError)
+    with ThreadPool(cores) as pool:
+        async_results = [pool.apply_async(getStoryline_mp, (arg,)) for arg in mp_args]
+        results = [None] * len(sort_sites)
+        for idx, site in enumerate(sort_sites):
+            t = site_total_timeout.get(site)
+            try:
+                results[idx] = async_results[idx].get(timeout=t)  # t=None 时一直等
+            except _TimeoutErrors:
+                results[idx] = None
+                if debug:
+                    print(f"[!]Storyline site '{site}' 整体超时 {t}s，放弃该站结果。")
+            except Exception as e:
+                results[idx] = None
+                if debug:
+                    print(f"[-]Storyline site '{site}' 执行异常: {e}")
+    return results
 
 
 def getStoryline_mp(args):
