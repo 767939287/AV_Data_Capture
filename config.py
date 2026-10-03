@@ -210,6 +210,19 @@ class Config:
     def ignore_failed_list(self) -> bool:
         return self.conf.getboolean("common", "ignore_failed_list")
 
+    def failed_list_separator(self) -> str:
+        """每次刮削任务开始时写入 failed_list.txt 的分隔行（[common] failed_list_separator）。
+
+        默认 "===="。用于把「每次运行失败的列表」分隔开，便于分格/分批任务识别批次。
+        留空则关闭自动分隔（不写入任何分隔行，保持与升级前一致）。
+        仅当文件已存在且非空、且最后一行不是该分隔行时才会追加，避免文件开头出现孤立分隔行或连续重复。
+        """
+        try:
+            v = self.conf.get("common", "failed_list_separator", fallback="====")
+        except Exception:
+            return "===="
+        return v if isinstance(v, str) else "===="
+
     def download_only_missing_images(self) -> bool:
         return self.conf.getboolean("common", "download_only_missing_images")
 

@@ -33,6 +33,18 @@ def moveFailedFolder(filepath):
     # 原先的创建软连接到失败目录，并不直观，不方便找到失败文件位置，不如直接记录该文件路径
     if conf.main_mode() == 3 or link_mode:
         ftxt = os.path.abspath(os.path.join(failed_folder, 'failed_list.txt'))
+        # 追加写入失败路径，但**绝不删除/覆盖已有内容**（供分格、分批任务续跑）。
+        # 若该路径已存在于列表中则跳过，避免重复追加；不存在才追加一行。
+        try:
+            existing = set()
+            if os.path.isfile(ftxt):
+                with open(ftxt, 'r', encoding='utf-8') as flt:
+                    existing = set(flt.read().splitlines())
+        except Exception:
+            existing = set()
+        if filepath in existing:
+            print("[-]Already in Failed List file, see '%s'" % ftxt)
+            return
         print("[-]Add to Failed List file, see '%s'" % ftxt)
         with open(ftxt, 'a', encoding='utf-8') as flt:
             flt.write(f'{filepath}\n')

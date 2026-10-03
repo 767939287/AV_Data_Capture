@@ -433,6 +433,54 @@ def create_failed_folder(failed_folder: str):
             os._exit(0)
 
 
+def _is_separator_line(line: str) -> bool:
+    """判断某一行是否为 failed_list.txt 的任务分隔行（以 === 开头即视为分隔行）。"""
+    return isinstance(line, str) and line.lstrip().startswith("===")
+
+
+def write_failed_list_separator():
+    """在 failed_list.txt 末尾写入一条带时间的分隔行，标记本次刮削任务开始。
+
+    仅用于分格/分批任务识别批次，规则：
+      - 分隔内容由 [common] failed_list_separator 决定（默认 "===="），留空则关闭；
+      - 文件不存在或为空时不写（避免文件开头出现孤立分隔行）；
+      - 若文件最后一行已是分隔行，则把该行更新时间戳（而不是再追加，避免空批次）；
+      - 否则在末尾追加一行。
+    本函数绝不删除任何已有内容；任何异常都被吞掉，不影响正常刮削。
+    """
+    conf = config.getInstance()
+    sep = conf.failed_list_separator()
+    # sep 为空字符串表示关闭自动分隔；非空时仅作为“是否启用”的开关，
+    # 实际分隔行用标准宽度(54)，以 '=' 补位、时间居中，风格与项目内注释分隔线一致。
+    if not isinstance(sep, str) or not len(sep):
+        return None
+    try:
+        ftxt = Path(conf.failed_folder()).resolve() / 'failed_list.txt'
+        if not ftxt.is_file():
+            return None
+        content = ftxt.read_text(encoding='utf-8')
+        if not content.strip():
+            return None
+        lines = content.split('\n')
+        # 去掉文件末尾空字符串（'\n'.split 产生），保留原始换行结构
+        while lines and lines[-1] == '':
+            lines.pop()
+        tmstr = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # 分隔行左右两侧的 '=' 数量必须完全相等（对称）。
+        # 总宽 = 2*N + 2空格 + 时间长度，恒为奇数，故用 N=17：
+        # "================= 2026-03-14 20:21:55 ================="   (左=右=17)
+        n_eq = 17
+        sep_line = f"{'=' * n_eq} {tmstr} {'=' * n_eq}"
+        if lines and _is_separator_line(lines[-1]):
+            lines[-1] = sep_line  # 上批次无新失败，覆盖更新时间戳
+        else:
+            lines.append(sep_line)
+        ftxt.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+        return sep_line
+    except Exception:
+        return None
+
+
 def rm_empty_folder(path):
     abspath = os.path.abspath(path)
     deleted = set()
@@ -593,6 +641,11 @@ def main(args: tuple) -> Path:
                 print('[!]' + "".center(54, "="))
 
     create_failed_folder(conf.failed_folder())
+    # 每次运行开始，在 failed_list.txt 末尾写入一条带时间的分隔行，用于分格/分批任务识别批次。
+    # 单文件模式、搜索模式下调用也无副作用（文件为空/不存在时不会写入）。
+    sep_line = write_failed_list_separator()
+    if sep_line:
+        print(f"[+]Failed list separator: {sep_line}")
 
     # create OpenCC converter
     ccm = conf.cc_convert_mode()
