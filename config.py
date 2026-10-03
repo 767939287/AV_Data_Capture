@@ -359,13 +359,28 @@ class Config:
             return ""
 
     def update_check(self) -> bool:
+        # [update] 段与自动更新/映射表下载功能已废弃。
+        # 配置文件中该段可能被整体注释掉，缺失时统一按“关闭更新检查”处理，
+        # 避免因缺少小节/键而抛异常中断程序。
         try:
             return self.conf.getboolean("update", "update_check")
-        except ValueError:
-            self._exit("update:update_check")
+        except (ValueError, configparser.NoSectionError, configparser.NoOptionError):
+            return False
 
     def sources(self) -> str:
         return self.conf.get("priority", "website")
+
+    def priority_dmm_image(self) -> bool:
+        """跨源 DMM 高清封面开关（位于 [priority] 段）。
+
+        1 开启：即使用别的刮削器(javbus/javdb 等)，也按番号去 DMM 取高清封面替换；
+        0 关闭（默认）：仅使用数据源自身封面。
+        段/键缺失或非法时返回 False，保证默认行为不变。
+        """
+        try:
+            return self.conf.getboolean("priority", "dmm_image", fallback=False)
+        except Exception:
+            return False
 
     def escape_literals(self) -> str:
         return self.conf.get("escape", "literals")
@@ -378,6 +393,18 @@ class Config:
 
     def get_direct(self) -> bool:
         return self.conf.getboolean("direct", "switch",fallback=True)
+
+    def dmm_image_switch(self) -> bool:
+        """DMM/FANZA 高清图升级开关。
+
+        [dmm_image] switch: 1 开启（尝试把低清封面/海报替换为 DMM 高清 CDN），
+                            0 关闭（默认，行为与升级前完全一致）。
+        段/键缺失或非法时返回 False，保证关闭时零副作用。
+        """
+        try:
+            return self.conf.getboolean("dmm_image", "switch", fallback=False)
+        except Exception:
+            return False
 
     def is_storyline(self) -> bool:
         try:

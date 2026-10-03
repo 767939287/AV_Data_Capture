@@ -315,6 +315,37 @@ def get_data_from_json(
             'Referer': 'https://www.javbus.com/' + number
         }
 
+    # ==================== DMM/FANZA 高清图升级 ====================
+    # 两个独立开关，均为默认关闭，互不影响，任何失败都保留原封面(A+B策略)：
+    #   1) [dmm_image] switch          : 数据源本就是 DMM/FANZA 时，把封面换成其高清 CDN 图。
+    #   2) [priority]  dmm_image       : 数据源不是 DMM 时，额外按番号去 DMM 取高清封面替换(跨源)。
+    # 说明：本地项目中海报由封面图派生，故只需处理 cover 即可同时作用于封面与海报。
+    # 失败时静默保留原封面，仅 debug 模式打印一行原因，绝不因升级失败影响刮削结果。
+    try:
+        from scrapinglib import dmm_image
+        original_cover = json_data.get('cover') or ''
+        new_cover = ''
+
+        if original_cover and conf.dmm_image_switch():
+            # 1) 数据源本身是 DMM：直接升级其低清封面为高清 CDN 图
+            new_cover = dmm_image.upgrade_cover(original_cover, proxies=proxies, verify=ca_cert)
+
+        if not new_cover and conf.priority_dmm_image():
+            # 2) 跨源：按番号去 DMM 搜索取高清封面（仅当来源非 DMM 或上一步未命中时）
+            new_cover = dmm_image.cross_source_cover(number, proxies=proxies, verify=ca_cert)
+            if not new_cover and conf.debug():
+                print(f'[-]DMM cover not found for {number}, keep source cover.')
+
+        if new_cover and new_cover != original_cover:
+            json_data['cover'] = new_cover
+            if conf.debug():
+                print(f'[+]DMM cover upgraded for {number}.')
+    except Exception as e:
+        # 升级失败一律吞掉，保留原封面
+        if conf.debug():
+            print(f'[-]DMM image upgrade skipped: {e}')
+    # ==================== DMM/FANZA 高清图升级 END ====================
+
     return json_data
 
 

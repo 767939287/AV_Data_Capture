@@ -29,14 +29,22 @@ DMM/FANZA 高清图升级（轻量版，方案 A）
     url = dmm_image.upgrade_poster(url)  # 海报
 """
 
+import re
 import config
 
+from lxml import etree
+
 from . import httprequest
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 
 # DMM 相关域名后缀，用于判断是否值得尝试升级
 _DMM_HOST_SUFFIX = ("dmm.co.jp", "dmm.com")
+
+# DMM 高清封面 CDN 模板：
+#   https://awsimgsrc.dmm.co.jp/pics_dig/digital/video/{cid}/{cid}ps.jpg  (竖版)
+#   https://awsimgsrc.dmm.co.jp/pics_dig/digital/video/{cid}/{cid}pl.jpg  (横版)
+_AWS_COVER_TMPL = "https://awsimgsrc.dmm.co.jp/pics_dig/digital/video/{cid}/{cid}{suffix}.jpg"
 
 
 def _is_dmm_url(url: str) -> bool:
@@ -185,3 +193,130 @@ def upgrade_poster(url: str, proxies=None, verify=None) -> str:
     if _valid_image(aws, proxies=proxies, verify=verify):
         return aws
     return url
+
+
+# ============================================================================
+# 路线 2：跨源升级
+#   即使用别的刮削器（javbus/javdb 等），也按番号去 DMM 取高清封面来替换。
+#   流程：番号 -> DMM 搜索页 -> 解析详情页 cid -> 构造 awsimgsrc 高清直链 -> 校验
+# ============================================================================
+
+# DMM 详情页 URL 中以 cid= 携带真实站内编号（如 ssis00200 / h_1240milk00123）
+_CID_RE = re.compile(r"cid=([0-9a-zA-Z_]+)", re.IGNORECASE)
+# DMM 搜索结果中详情页链接的通用形态
+_DETAIL_HREF_RE = re.compile(r"/(?:digital|mono|rental|prime|monthly|anime)/[^\"'#?]*/-/detail/=/cid=([0-9a-zA-Z_]+)",
+                             re.IGNORECASE)
+
+
+def _normalize_number(number: str) -> str:
+    """把番号规整为 DMM 搜索更易命中的形态（保留字母数字与横杠，小写）。
+
+    例：'SSIS-200' -> 'ssis-200'，'ssis 200' -> 'ssis200'。
+    """
+    if not isinstance(number, str):
+        return ""
+    number = number.strip().lower()
+    number = re.sub(r"[^0-9a-z\-]", "", number)
+    return number
+
+
+def _cid_candidates_from_number(number: str):
+    """由番号直接推导可能的 DMM cid 候选（无需搜索即可命中的常见情况）。
+
+    规则（参考 DMM 站内编号）：
+      - 前缀+数字：'ssis-200' -> 'ssis00200'（数字补零到 5 位）
+      - 无横杠形态：'ssis200'
+    仅作为搜索解析失败时的兜底，最终仍以搜索页解析出的 cid 为准。
+    """
+    normalized = _normalize_number(number)
+    if not normalized:
+        return []
+    candidates = []
+    m = re.match(r"^([a-z]+)-?(\d+)$", normalized)
+    if m:
+        prefix, digits = m.group(1), m.group(2)
+        candidates.append(f"{prefix}{int(digits):05d}")  # ssis + 00200
+    no_dash = normalized.replace("-", "")
+    candidates.append(no_dash)
+    # 去重保序
+    seen = set()
+    result = []
+    for c in candidates:
+        if c and c not in seen:
+            seen.add(c)
+            result.append(c)
+    return result
+
+
+def get_dmm_cid(number: str, proxies=None, verify=None) -> str:
+    """通过 DMM 搜索页解析出该番号对应的站内 cid。
+
+    优先解析搜索结果里分值最高的详情页链接；解析不到则返回空串。
+    """
+    normalized = _normalize_number(number)
+    if not normalized:
+        return ""
+    # DMM 搜索对 00 补零/无补零两种形态都有结果，这里两种都试
+    search_numbers = [normalized]
+    if re.match(r"^[a-z]+\d+$", normalized):
+        m = re.match(r"^([a-z]+)(\d+)$", normalized)
+        prefix, digits = m.group(1), m.group(2)
+        if len(digits) < 5:
+            search_numbers.append(f"{prefix}-{int(digits):05d}")
+        search_numbers.append(f"{prefix}-{digits}")
+    search_numbers = _dedupe(search_numbers)
+
+    for s_num in search_numbers:
+        url = "https://www.dmm.co.jp/search/=/searchstr=" + quote(s_num) + "/"
+        try:
+            html = httprequest.get(url, retry=1, timeout=12,
+                                   proxies=proxies, verify=verify)
+        except Exception:
+            continue
+        if not html or html == 404:
+            continue
+        # 从 HTML 中直接提取详情页 cid（比 xpath 更稳，覆盖脚本内嵌链接）
+        cids = _DETAIL_HREF_RE.findall(html)
+        if not cids:
+            # 兜底：任意 cid= 形态
+            cids = _CID_RE.findall(html)
+        cids = _dedupe([c for c in cids if c])
+        if not cids:
+            continue
+        # 选与番号数字部分最匹配的 cid（例如 ssis-200 优先匹配 ssis00200）
+        normalized_digits = re.sub(r"\D", "", normalized)
+        for cid in cids:
+            if normalized_digits and normalized_digits.lstrip("0") in cid.lstrip("0"):
+                return cid
+        return cids[0]
+    return ""
+
+
+def build_aws_cover_url(cid: str) -> str:
+    """由 cid 构造 DMM 高清封面直链（竖版 ps.jpg）。"""
+    if not cid:
+        return ""
+    return _AWS_COVER_TMPL.format(cid=cid, suffix="ps")
+
+
+def cross_source_cover(number: str, proxies=None, verify=None) -> str:
+    """跨源高清封面：按番号从 DMM 取高清封面直链，取不到返回空串。
+
+    仅返回通过 HEAD 校验的地址；任何失败都返回空串，由调用方保留原源封面。
+    """
+    if not number:
+        return ""
+    # 1) 直接由番号推导 cid 候选（快，命中常见系列）
+    for cid in _cid_candidates_from_number(number):
+        for suffix in ("pl", "ps"):  # 横版优先
+            candidate = _AWS_COVER_TMPL.format(cid=cid, suffix=suffix)
+            if _valid_image(candidate, proxies=proxies, verify=verify):
+                return candidate
+    # 2) 走 DMM 搜索页拿到真实 cid（覆盖特殊前缀/组合系列）
+    cid = get_dmm_cid(number, proxies=proxies, verify=verify)
+    if cid:
+        for suffix in ("pl", "ps"):
+            candidate = _AWS_COVER_TMPL.format(cid=cid, suffix=suffix)
+            if _valid_image(candidate, proxies=proxies, verify=verify):
+                return candidate
+    return ""
