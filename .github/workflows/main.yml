@@ -1,12 +1,17 @@
 name: PyInstaller
 
+# 仅手动触发：在 GitHub 仓库页面 Actions 标签页选择本 workflow 后点击 "Run workflow" 运行。
+# 已移除 push / pull_request 自动触发，避免每次提交都消耗构建配额。
+# 运行时可选择分支：
+#   - 使用 GitHub 界面上方的 "Use workflow from" 下拉框选择分支（原生支持）；
+#   - 或在下方 branch 输入框中填写分支名（优先级更高，留空则使用上面下拉框所选分支）。
 on:
-  push:
-    branches:
-      - master
-  pull_request:
-    branches:
-      - master
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: '要构建的分支（留空则使用界面上 "Use workflow from" 所选分支）'
+        required: false
+        default: ''
 
 jobs:
   build:
@@ -17,7 +22,10 @@ jobs:
         # os: [windows-latest, macos-latest, ubuntu-latest]
         os: [ubuntu-22.04]
     steps:
+      # branch 输入非空时 checkout 指定分支，否则 checkout 触发时选中的分支/提交
       - uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.inputs.branch || github.ref }}
 
       - name: Install UPX
         uses: crazy-max/ghaction-upx@v2
