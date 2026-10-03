@@ -287,19 +287,22 @@ def _to_dict(item: dict, fallback_number: str) -> dict:
     }
 
 
-def search_by_number(number: str, proxies=None, verify=None):
+def search_by_number(number: str, proxies=None, verify=None, force=False):
     """用 DMM 官方 API 按番号检索，返回 dictformat 结构的 dict；失败返回 None。
 
     任何异常（网络/凭据/无匹配）都返回 None，由调用方回退到其它源。
+    force=True 时忽略 [dmm_api] switch 开关强制尝试（用于详情页失败后的兜底）。
     """
     if not number:
         return None
-    # 开关关闭时直接返回 None，保证默认行为与升级前一致（fanza 仍只爬详情页）
-    try:
-        if not config.getInstance().dmm_api_switch():
+    # 开关关闭时直接返回 None，保证默认行为与升级前一致（fanza 仍只爬详情页）；
+    # force=True（详情页已失败）时跳过开关检查。
+    if not force:
+        try:
+            if not config.getInstance().dmm_api_switch():
+                return None
+        except Exception:
             return None
-    except Exception:
-        return None
     number = number.strip()
 
     for keyword in _search_keywords(number):

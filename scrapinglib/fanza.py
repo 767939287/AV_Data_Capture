@@ -34,25 +34,9 @@ class Fanza(Parser):
 
         # 1) 优先走 DMM 官方 Affiliate API（稳定、结构化；FANZA 即 DMM 成人品牌，内容同源）。
         #    失败（无凭据/无匹配/网络异常）时回退到下面的详情页爬取。
-        try:
-            from .dmm_api import search_by_number as _dmm_api_search_by_number
-            api_data = _dmm_api_search_by_number(number, proxies=self.proxies, verify=self.verify)
-            if api_data and (api_data.get("title") or api_data.get("cover")):
-                # API 无简介；需要更多剧情时由 storyline 在 getOutline 阶段补充
-                if getattr(self, "morestoryline", False):
-                    try:
-                        from .storyline import getStoryline
-                        more = getStoryline(api_data.get("number", number),
-                                            uncensored=getattr(self, "uncensored", False),
-                                            proxies=self.proxies, verify=self.verify)
-                        if isinstance(more, str) and len(more):
-                            api_data["outline"] = more
-                    except Exception:
-                        pass
-                return json.dumps(api_data, ensure_ascii=False, sort_keys=True,
-                                  separators=(',', ':'))
-        except Exception:
-            pass
+        api_result = self._search_by_api(number)
+        if api_result is not None:
+            return api_result
 
         # fanza allow letter + number + underscore, normalize the input here
         # @note: I only find the usage of underscore as h_test123456789
@@ -89,8 +73,48 @@ class Fanza(Parser):
                     self.htmltree = etree.HTML(self.htmlcode)
                     if self.htmltree is not None:
                         result = self.dictformat(self.htmltree)
-                        return result
+                        # dictformat 解析失败时会返回 title 为空的破数据，
+                        # 此时不立即返回，继续尝试下一个 cid/URL（如 digital->mono 等不同版位）。
+                        try:
+                            if json.loads(result).get("title"):
+                                return result
+                        except Exception:
+                            pass
+
+        # 2) 详情页全部失败（地区限制/下架/改版等）后，最后兜底再试一次官方 API。
+        #    注意：即便 [dmm_api] switch 关闭，这里也强制尝试一次（详情页已全军覆没）。
+        api_result = self._search_by_api(number, force=True)
+        if api_result is not None:
+            return api_result
         return 404
+
+    def _search_by_api(self, number, force=False):
+        """走 DMM 官方 Affiliate API，返回 JSON 字符串；不可用/无匹配返回 None。
+
+        force=True 时忽略 [dmm_api] switch 开关强制尝试（用于详情页失败后的兜底）。
+        任何异常都返回 None，由调用方决定后续回退。
+        """
+        try:
+            from .dmm_api import search_by_number as _dmm_api_search_by_number
+            api_data = _dmm_api_search_by_number(number, proxies=self.proxies,
+                                                 verify=self.verify, force=force)
+            if not api_data or not (api_data.get("title") or api_data.get("cover")):
+                return None
+            # API 无简介；需要更多剧情时由 storyline 在 getOutline 阶段补充
+            if getattr(self, "morestoryline", False):
+                try:
+                    from .storyline import getStoryline
+                    more = getStoryline(api_data.get("number", number),
+                                        uncensored=getattr(self, "uncensored", False),
+                                        proxies=self.proxies, verify=self.verify)
+                    if isinstance(more, str) and len(more):
+                        api_data["outline"] = more
+                except Exception:
+                    pass
+            return json.dumps(api_data, ensure_ascii=False, sort_keys=True,
+                              separators=(',', ':'))
+        except Exception:
+            return None
 
     @staticmethod
     def _cid_candidates(fanza_search_number):
