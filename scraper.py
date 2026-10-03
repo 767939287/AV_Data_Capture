@@ -144,6 +144,51 @@ def get_data_from_json(
         tag.remove('XXXX')
     while 'xxx' in tag:
         tag.remove('xxx')
+
+    # ==================== 跨源标签补全 ====================
+    # [priority] tag_source = javbus  时：无论主数据源是什么（如 source=dmm/fanza），
+    # 额外用指定刮削器按番号取标签，与主源标签合并去重（tag_mode=merge）或替换（replace）。
+    # 放在此处是为了让跨源标签同样经过后续的翻译/简繁转换处理，保持一致。
+    # 任何失败都保留主源标签，绝不因跨源失败影响刮削结果。
+    try:
+        tag_source = conf.priority_tag_source()
+        if tag_source:
+            sources_want = [s.strip() for s in tag_source.split(',') if s.strip()]
+            # 主源本身在列表里则跳过（避免重复请求同一源）
+            sources_want = [s for s in sources_want if s != source]
+            cross_tags = []
+            for src in sources_want:
+                try:
+                    cross_data = search(file_number, src, proxies=proxies, verify=ca_cert,
+                                        dbsite=javdb_site, dbcookies=javdb_cookies,
+                                        specifiedSource=src, debug=conf.debug())
+                except Exception:
+                    cross_data = None
+                if not cross_data:
+                    continue
+                raw = cross_data.get('tag')
+                if isinstance(raw, str):
+                    raw = raw.strip("[ ]").replace("'", '').replace(" ", '').split(',')
+                if isinstance(raw, list):
+                    for t in raw:
+                        t = str(t).strip()
+                        if t and t not in cross_tags:
+                            cross_tags.append(t)
+            if cross_tags:
+                if conf.priority_tag_mode() == "replace":
+                    tag = cross_tags
+                else:
+                    for t in cross_tags:
+                        if t not in tag:
+                            tag.append(t)
+                if conf.debug():
+                    print(f'[+]Cross-source tags from {tag_source}: {cross_tags}')
+            elif conf.debug():
+                print(f'[-]Cross-source tag not found for {file_number} (source={tag_source}).')
+    except Exception as e:
+        if conf.debug():
+            print(f'[-]Cross-source tag skipped: {e}')
+    # ==================== 跨源标签补全 END ====================
     if json_data['source'] =='pissplay': # pissplay actor为英文名，不用去除空格
         actor = str(actor_list).strip("[ ]").replace("'", '')
     else:

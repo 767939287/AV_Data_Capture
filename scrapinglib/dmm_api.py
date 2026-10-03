@@ -14,16 +14,24 @@ DMM 官方 Affiliate API 客户端（参考 MDCx 的 dmm_api.py）。
     - fanza.py 解析的字段更贴近详情页（简介、样图等）
     - dmm_api.py 更稳、更全（有 review 评分、actress/director 结构化字段）
 
-API 返回的关键字段：
+API 返回的关键字段（对照 MDCx dmm_digital_payload 响应字段补全）：
     result.items[].content_id     站内 cid（如 ssis00200 / 436abf00123）
     result.items[].title          标题
     result.items[].date           发售/配信日
     result.items[].volume         收录时间（分钟）
-    result.items[].review.average 评分
-    result.items[].imageURL.large 大图（竖版 ps.jpg）
-    result.items[].sampleImageURL.sample_l.image[] 剧照
+    result.items[].review.average 评分；review.count 评分人数
+    result.items[].imageURL.large 封面大图（ps.jpg -> 升级 pl.jpg 横版）
+    result.items[].sampleImageURL.sample_l.image[] 剧照（-N.jpg -> jp-N.jpg 高清）
+    result.items[].sampleMovieURL 预告片直链（size_720_480 等分辨率）
     result.items[].iteminfo.*     结构化：actress/director/genre/maker/label/series
     result.items[].affiliateURL   推广链接
+
+字段映射（API -> dictformat），参考 MDCx：
+    packageImage.largeUrl -> cover
+    sample2DMovie.url     -> trailer
+    duration              -> runtime
+    makerReleasedAt       -> release
+    reviewSummary.average -> userrating
 
 用法：
     from .dmm_api import search_by_number
@@ -168,49 +176,95 @@ def _score(review) -> str:
     return m.group() if m else ""
 
 
+def _review_count(review) -> str:
+    """评分人数（review.count）。"""
+    if not isinstance(review, dict):
+        return ""
+    for key in ("count", "reviewer_count"):
+        v = review.get(key)
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    return ""
+
+
 def _thumb_url(item: dict) -> str:
-    """取大图 URL（imageURL.large，通常为竖版 ps.jpg）。"""
+    """取封面大图 URL。
+
+    参考 MDCx DigitalParser.thumb：DMM 的图以 ps.jpg(竖版) 提供，
+    升级为 pl.jpg(横版大图) 可获得更完整封面。这里优先 imageURL.large 并做 ps->pl。
+    """
     img = item.get("imageURL") or {}
     for key in ("large", "small", "list"):
         url = img.get(key)
         if url:
-            return url
+            return url.replace("ps.jpg", "pl.jpg")
     return ""
 
 
 def _sample_images(item: dict):
-    """取样图 URL 列表（sample_l 优先）。"""
+    """取样图 URL 列表（sample_l 优先，已升级到 jp- 高清）。"""
     for key in ("sample_l", "sample_s"):
         block = (item.get("sampleImageURL") or {}).get(key)
         if isinstance(block, dict):
             imgs = block.get("image", [])
             if imgs:
-                return list(imgs)
+                # DMM 剧照高清规则: -N.jpg -> jp-N.jpg
+                return [re.sub(r"-(\d+)\.jpg", r"jp-\1.jpg", u) for u in imgs]
     return []
 
 
+def _sample_movie_url(item: dict) -> str:
+    """取预告片直链。
+
+    DMM Affiliate API 在 sampleMovieURL 下按分辨率提供多个 URL，
+    如 size_720_480 / size_560_360 / size_476_306，优先取最高分辨率。
+    """
+    mv = item.get("sampleMovieURL")
+    if not isinstance(mv, dict):
+        return ""
+    # 常见分辨率键，按从高到低优先级
+    for key in ("size_720_480", "size_560_360", "size_476_306", "size_640_360"):
+        url = mv.get(key)
+        if url:
+            return str(url).strip()
+    # 兜底：取第一个 http 开头的值
+    for v in mv.values():
+        if isinstance(v, str) and v.startswith("http"):
+            return v.strip()
+    return ""
+
+
 def _to_dict(item: dict, fallback_number: str) -> dict:
-    """把 API item 映射为当前项目 dictformat 的字段结构。"""
+    """把 API item 映射为当前项目 dictformat 的字段结构。
+
+    字段参考 MDCx 的 dmm_digital_payload / dmm_api 响应：
+      packageImage.largeUrl -> cover（ps->pl 横版大图）
+      sample2DMovie         -> trailer
+      duration              -> runtime
+      makerReleasedAt/deliveryStartDate -> release
+      reviewSummary.average -> userrating
+    """
     title = str(item.get("title") or "").strip()
 
-    # 封面：默认直接用 API 返回的 imageURL.large（保证一定有效，不会变死链）。
-    # 高清升级交给 dmm_image（[dmm_image] switch 开启时）按 pics.dmm -> awsimgsrc 规则处理。
-    thumb = _thumb_url(item)
-    cover = thumb
+    # 封面：imageURL.large 并升级 ps->pl（横版大图），保证有图且更完整。
+    cover = _thumb_url(item)
 
-    # 样图升级到高清: -N.jpg -> jp-N.jpg（与详情页一致）
-    samples = [re.sub(r"-(\d+)\.jpg", r"jp-\1.jpg", u) for u in _sample_images(item)]
+    # 样图（已升级 jp- 高清）
+    samples = _sample_images(item)
 
     release_raw = str(item.get("date") or "").strip()
     release = release_raw.split(" ")[0] if release_raw else ""
 
     actors = _info_names(item, "actress")
     directors = _info_names(item, "director")
+    makers = _info_names(item, "maker")
+    labels = _info_names(item, "label")
+    series = _info_names(item, "series")
 
     return {
         "number": fallback_number,
         "title": title,
-        "studio": _first(_info_names(item, "maker")),
+        "studio": _first(makers),
         "release": release,
         "outline": "",  # API 无简介，交由 storyline 补充
         "runtime": _runtime(item.get("volume")),
@@ -220,12 +274,12 @@ def _to_dict(item: dict, fallback_number: str) -> dict:
         "cover": cover,
         "cover_small": "",
         "extrafanart": samples,
-        "trailer": "",
+        "trailer": _sample_movie_url(item),
         "tag": _info_names(item, "genre"),
-        "label": _first(_info_names(item, "label")),
-        "series": _first(_info_names(item, "series")),
+        "label": _first(labels),
+        "series": _first(series),
         "userrating": _score(item.get("review")),
-        "uservotes": "",
+        "uservotes": _review_count(item.get("review")),
         "uncensored": False,
         "website": str(item.get("affiliateURL") or item.get("URL") or ""),
         "source": "fanza",

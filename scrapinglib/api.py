@@ -89,9 +89,15 @@ class Scraping:
         self.dbcookies = dbcookies
         self.dbsite = dbsite
         self.morestoryline = morestoryline
+        # sources 既可能是 "a,b,c" 字符串，也可能是列表；归一化后再遍历，
+        # 避免字符串被按字符逐个迭代（如 "javbus" -> 'j','a','v'...）。
+        if isinstance(sources, str):
+            _sources_iter = [s.strip() for s in sources.split(',') if s.strip()]
+        else:
+            _sources_iter = list(sources) if sources else []
         # 动态加载各爬虫的cookie
         valid_cookies = {}
-        for source in sources:
+        for source in _sources_iter:
             if source_cookies := self.load_cookies_for_source(source, dbsite):
                 valid_cookies[source] = source_cookies
 

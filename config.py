@@ -382,6 +382,33 @@ class Config:
         except Exception:
             return False
 
+    def priority_tag_source(self) -> str:
+        """跨源标签来源刮削器（位于 [priority] 段，键名 tag_source）。
+
+        设为某个刮削器名（如 javbus），则无论主数据源是什么，都会额外调用
+        该刮削器按番号取标签(tag)，并与主源标签合并去重后使用。
+        留空或缺失时禁用（默认），保证默认行为不变。
+        多个来源可用逗号分隔，按顺序合并。
+        """
+        try:
+            v = self.conf.get("priority", "tag_source", fallback="")
+        except Exception:
+            return ""
+        return (v or "").strip()
+
+    def priority_tag_mode(self) -> str:
+        """跨源标签合并模式（位于 [priority] 段，键名 tag_mode）。
+
+        merge（默认）：主源标签 + 跨源标签，去重合并；
+        replace      ：仅用跨源标签替换主源标签（跨源为空时保留主源标签）。
+        非法值按 merge 处理。
+        """
+        try:
+            v = (self.conf.get("priority", "tag_mode", fallback="merge") or "").strip().lower()
+        except Exception:
+            return "merge"
+        return v if v in ("merge", "replace") else "merge"
+
     def escape_literals(self) -> str:
         return self.conf.get("escape", "literals")
 
@@ -603,6 +630,9 @@ class Config:
         sec6 = "priority"
         conf.add_section(sec6)
         conf.set(sec6, "website", "airav,javbus,javdb,fanza,xcity,mgstage,fc2,fc2club,avsox,jav321,xcity")
+        conf.set(sec6, "dmm_image", "0")
+        conf.set(sec6, "tag_source", "")
+        conf.set(sec6, "tag_mode", "merge")
 
         sec7 = "escape"
         conf.add_section(sec7)

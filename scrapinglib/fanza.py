@@ -240,30 +240,60 @@ class Fanza(Parser):
         return ret
     
     def getCover(self, htmltree):
+        # 1) 优先 og:image（参考 MDCx DigitalParser/MonoParser 的 thumb 实现）。
+        #    DMM/FANZA 改版后详情页不再有 #sample-image1，旧选择器必然失败，
+        #    而 og:image 始终存在；ps.jpg(竖版) 升级为 pl.jpg(横版大图)。
+        try:
+            og = htmltree.xpath('//meta[@property="og:image"]/@content')
+            if og and og[0].strip():
+                url = og[0].strip()
+                if not url.startswith('http'):
+                    url = 'https:' + url
+                return url.replace('ps.jpg', 'pl.jpg')
+        except Exception:
+            pass
+        # 2) 回退旧逻辑：#sample-image1 / #<number>
         cover_number = self.number
         try:
-            result = htmltree.xpath('//*[@id="sample-image1"]/img/@src')[0]
-        except:
-            # sometimes fanza modify _ to \u0005f for image id
+            return htmltree.xpath('//*[@id="sample-image1"]/img/@src')[0]
+        except Exception:
             if "_" in cover_number:
                 cover_number = cover_number.replace("_", r"\u005f")
             try:
-                result = htmltree.xpath('//*[@id="' + cover_number + '"]/@href')[0]
-            except:
-                # (TODO) handle more edge case
-                # print(html)
-                # raise exception here, same behavior as before
-                # people's major requirement is fetching the picture
-                raise ValueError("can not find image")
-        return result
+                return htmltree.xpath('//*[@id="' + cover_number + '"]/@href')[0]
+            except Exception:
+                pass
+        # 3) 都拿不到时返回空串，交由上层 get_data_state 判定失败并尝试下一个 cid/源，
+        #    而不是抛异常导致整个 dictformat 中断（简介、演员等字段也一并丢失）。
+        return ''
 
     def getExtrafanart(self, htmltree):
-        htmltext = re.search(r'<div id=\"sample-image-block\"[\s\S]*?<br></div>\s*?</div>', self.htmlcode)
+        # 1) 优先从 JSON-LD 的 image 列表取（参考 MDCx DigitalParser：images[3:] 为剧照）
+        try:
+            json_text = self.getTreeElement(htmltree, '//script[@type="application/ld+json"]/text()')
+            if json_text:
+                data = json.loads(json_text)
+                images = data.get("image") if isinstance(data, dict) else None
+                if isinstance(images, list) and len(images) > 3:
+                    # DMM 剧照高清规则: -N.jpg -> jp-N.jpg
+                    return [re.sub(r'-(\d+)\.jpg', r'jp-\1.jpg', u) for u in images[3:]]
+        except Exception:
+            pass
+        # 2) 回退旧逻辑：从 sample-image-block 的 <a href> / <img src> 取
+        sheet = []
+        try:
+            hrefs = htmltree.xpath('//div[@id="sample-image-block"]/a/@href')
+            for img_url in hrefs:
+                sheet.append(re.sub(r'-(\d+)\.jpg', r'jp-\1.jpg', img_url))
+        except Exception:
+            pass
+        if sheet:
+            return sheet
+        htmltext = re.search(r'<div id=\"sample-image-block\"[\s\S]*?<br></div>\s*?</div>', self.htmlcode or '')
         if htmltext:
             htmltext = htmltext.group()
             extrafanart_images = re.findall(r'<img.*?src=\"(.*?)\"', htmltext)
             if extrafanart_images:
-                sheet = []
                 for img_url in extrafanart_images[1:]:
                     url_cuts = img_url.rsplit('-', 1)
                     sheet.append(url_cuts[0] + 'jp-' + url_cuts[1])
@@ -282,13 +312,26 @@ class Fanza(Parser):
         return ''
 
     def getFanzaString(self, expr):
-        result1 = str(self.htmltree.xpath("//td[contains(text(),'"+expr+"')]/following-sibling::td/a/text()")).strip(" ['']")
-        result2 = str(self.htmltree.xpath("//td[contains(text(),'"+expr+"')]/following-sibling::td/text()")).strip(" ['']")
-        return result1+result2
+        # 同时兼容旧版 <td> 与新版 <th> 布局（参考 MDCx DigitalParser/MonoParser）
+        for tag in ("td", "th"):
+            result1 = str(self.htmltree.xpath(
+                f"//{tag}[contains(text(),'{expr}')]/following-sibling::td/a/text()")).strip(" ['']")
+            result2 = str(self.htmltree.xpath(
+                f"//{tag}[contains(text(),'{expr}')]/following-sibling::td/text()")).strip(" ['']")
+            combined = result1 + result2
+            if combined.strip():
+                return combined
+        return ''
 
     def getFanzaStrings(self, string):
-        result1 = self.htmltree.xpath("//td[contains(text(),'" + string + "')]/following-sibling::td/a/text()")
-        if len(result1) > 0:
-            return result1
-        result2 = self.htmltree.xpath("//td[contains(text(),'" + string + "')]/following-sibling::td/text()")
-        return result2
+        # 同时兼容旧版 <td> 与新版 <th> 布局（参考 MDCx DigitalParser/MonoParser）
+        for tag in ("td", "th"):
+            result1 = self.htmltree.xpath(
+                f"//{tag}[contains(text(),'{string}')]/following-sibling::td/a/text()")
+            if len(result1) > 0:
+                return result1
+            result2 = self.htmltree.xpath(
+                f"//{tag}[contains(text(),'{string}')]/following-sibling::td/text()")
+            if len(result2) > 0:
+                return result2
+        return []
