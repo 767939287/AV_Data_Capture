@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 
+import os
 import re
+import json
+import inspect
 from lxml import etree
 from urllib.parse import urlencode
 from .parser import Parser
@@ -15,6 +18,8 @@ class Fanza(Parser):
     # expr_extrafanart = '//a[@name="sample-image"]/img/@src'
     expr_outline = "//div[@class='mg-b20 lh4']/text()"
     expr_outline2 = "//div[@class='mg-b20 lh4']//p/text()"
+    expr_outline3 = "//div[contains(@class,'wrapper-detailContents')]/following-sibling::div/p[contains(@class,'mg-b20')]/text()"
+    expr_outline4 = ".//div[@class='clear']/p/text()"
     expr_outline_og = '//head/meta[@property="og:description"]/@content'
     expr_runtime = "//td[contains(text(),'収録時間')]/following-sibling::td/text()"
 
@@ -45,17 +50,43 @@ class Fanza(Parser):
             "https://www.dmm.co.jp/rental/-/detail/=/cid=",
         ]
 
-        for url in fanza_urls:
-            self.detailurl = url + fanza_search_number
-            url = "https://www.dmm.co.jp/age_check/=/declared=yes/?"+ urlencode({"rurl": self.detailurl})
-            self.htmlcode = self.getHtml(url)
-            if self.htmlcode != 404 \
-                    and 'Sorry! This content is not available in your region.' not in self.htmlcode:
-                self.htmltree = etree.HTML(self.htmlcode)
-                if self.htmltree is not None:
-                    result = self.dictformat(self.htmltree)
-                    return result
+        # DMM/FANZA 的 cid 是「字母前缀 + 数字补零到5位」，例如：
+        #   ABF-123  -> abf00123
+        #   SSIS-001 -> ssis00001
+        #   STARS-1  -> stars00001
+        # 而 AV_Data_Capture 传入的番号多为去掉连字符的短格式(如 abf123)，
+        # 直接拼 cid 会 404，因此这里生成候选 cid 依次尝试。
+        for fanza_cid in self._cid_candidates(fanza_search_number):
+            for url in fanza_urls:
+                self.detailurl = url + fanza_cid
+                req_url = "https://www.dmm.co.jp/age_check/=/declared=yes/?"+ urlencode({"rurl": self.detailurl})
+                self.htmlcode = self.getHtml(req_url)
+                if self.htmlcode != 404 \
+                        and 'Sorry! This content is not available in your region.' not in self.htmlcode:
+                    self.htmltree = etree.HTML(self.htmlcode)
+                    if self.htmltree is not None:
+                        result = self.dictformat(self.htmltree)
+                        return result
         return 404
+
+    @staticmethod
+    def _cid_candidates(fanza_search_number):
+        """根据番号生成 DMM/FANZA 可能的 cid 候选（保持优先级顺序，去重）。
+
+        DMM 的 cid 数字部分统一补零到 5 位：
+            abf123  -> ['abf123', 'abf00123']   # 原样先试，再补零
+            ssis001 -> ['ssis001', 'ssis00001']
+            stars1  -> ['stars1', 'stars00001']
+        """
+        candidates = [fanza_search_number]
+        m = re.match(r'^([a-z]+)(\d+)$', fanza_search_number)
+        if m:
+            prefix, digits = m.groups()
+            if len(digits) < 5:
+                padded = prefix + digits.zfill(5)
+                if padded not in candidates:
+                    candidates.append(padded)
+        return candidates
 
     def getNum(self, htmltree):
         # for some old page, the input number does not match the page
@@ -76,15 +107,60 @@ class Fanza(Parser):
         return self.getFanzaString('メーカー')
 
     def getOutline(self, htmltree):
-        try:
-            result = self.getTreeElement(htmltree, self.expr_outline).replace("\n", "")
-            if result == '':
-                result = self.getTreeElement(htmltree, self.expr_outline2).replace("\n", "")
-            if "※ 配信方法によって収録内容が異なる場合があります。" == result:
-                result = self.getTreeElement(htmltree, self.expr_outline_og)
+        result = self._getFanzaOutline(htmltree)
+        # 关闭 storyline 时直接返回 FANZA 自身的（日文）简介
+        if not self.morestoryline:
             return result
-        except:
-            return ''
+        # 从 storyline.py 出发时不可再回调 storyline.py 中的 fanza 源，避免无限递归
+        if any(
+            caller
+            for caller in inspect.stack()
+            if os.path.basename(caller.filename) == "storyline.py"
+        ):
+            return result
+        # 优先使用 FANZA 自身的简介，仅当其缺失时才回退到中文剧情简介站点
+        if isinstance(result, str) and len(result.strip()):
+            return result
+        from .storyline import getStoryline
+        try:
+            more = getStoryline(
+                self.number,
+                uncensored=self.uncensored,
+                proxies=self.proxies,
+                verify=self.verify,
+            )
+            if isinstance(more, str) and len(more):
+                return more
+        except Exception:
+            pass
+        return result
+
+    def _getFanzaOutline(self, htmltree):
+        """从 FANZA/DMM 详情页解析（日文）剧情简介，多选择器依次回退。"""
+        # 1) digital/video 页面优先从 JSON-LD 里取 description
+        try:
+            json_text = self.getTreeElement(htmltree, '//script[@type="application/ld+json"]/text()')
+            if json_text:
+                data = json.loads(json_text)
+                desc = data.get("description") if isinstance(data, dict) else None
+                if isinstance(desc, str) and desc.strip():
+                    return desc.strip()
+        except Exception:
+            pass
+        # 2) 依次尝试各站点布局的详情页简介选择器
+        for expr in (self.expr_outline, self.expr_outline2, self.expr_outline3, self.expr_outline4):
+            try:
+                result = self.getTreeElement(htmltree, expr).replace("\n", "").strip()
+            except Exception:
+                result = ''
+            if result and "※ 配信方法によって収録内容が異なる場合があります。" != result:
+                return result
+        # 3) 回退到 og:description
+        try:
+            result = self.getTreeElement(htmltree, self.expr_outline_og).replace("\n", "").strip()
+        except Exception:
+            result = ''
+        return result
 
     def getRuntime(self, htmltree):
         return str(re.search(r'\d+', super().getRuntime(htmltree)).group()).strip(" ['']")

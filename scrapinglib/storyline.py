@@ -21,7 +21,7 @@ from .xcity import Xcity
 from . import httprequest
 
 # 舍弃 Amazon 源
-G_registered_storyline_site = {"airavwiki", "airav", "avno1", "xcity", "58avgo"}
+G_registered_storyline_site = {"airavwiki", "airav", "avno1", "xcity", "58avgo", "fanza", "mgstage"}
 
 G_mode_txt = ('顺序执行', '线程池')
 
@@ -65,20 +65,27 @@ def getStoryline(number, title=None, sites: list = None, uncensored=None, proxie
     cores = min(len(sort_sites), os.cpu_count())
     if cores == 0:
         return ''
-    run_mode = 1
+    run_mode = config.getInstance().storyline_mode()
     with ThreadPool(cores) if run_mode > 0 else noThread() as pool:
         results = pool.map(getStoryline_mp, mp_args)
     sel = ''
 
+    prefer_jp = config.getInstance().storyline_prefer_jp()
     # 以下debug结果输出会写入日志
     s = f'[!]Storyline{G_mode_txt[run_mode]}模式运行{len(sort_sites)}个任务共耗时(含启动开销){time.time() - start_time:.3f}秒，结束于{time.strftime("%H:%M:%S")}'
     sel_site = ''
     for site, desc in zip(sort_sites, results):
         if isinstance(desc, str) and len(desc):
+            if prefer_jp:
+                # 站点列表顺序即优先级：取第一个有结果的简介（即使为日文，如 fanza）
+                sel_site, sel = site, desc
+                break
             if not is_japanese(desc):
+                # 优先选择中文简介
                 sel_site, sel = site, desc
                 break
             if not len(sel_site):
+                # 全是日文简介时，取第一个日文结果兜底
                 sel_site, sel = site, desc
     for site, desc in zip(sort_sites, results):
         sl = len(desc) if isinstance(desc, str) else 0
@@ -104,6 +111,10 @@ def getStoryline_mp(args):
         storyline = getStoryline_xcity(number, debug, proxies, verify)
     elif site == "58avgo":
         storyline = getStoryline_58avgo(number, debug, proxies, verify)
+    elif site == "fanza":
+        storyline = getStoryline_fanza(number, debug, proxies, verify)
+    elif site == "mgstage":
+        storyline = getStoryline_mgstage(number, debug, proxies, verify)
     if debug:
         print("[!]MP 线程[{}]运行{:.3f}秒，结束于{}返回结果: {}".format(
             site,
@@ -281,5 +292,45 @@ def getStoryline_xcity(number, debug, proxies, verify):  # 获取剧情介绍 �
     except Exception as e:
         if debug:
             print(f"[-]MP getOutline_xcity Error: {e}, number [{number}].")
+        pass
+    return ''
+
+
+def getStoryline_fanza(number, debug, proxies, verify):  # 获取剧情介绍 从 FANZA/DMM 取得(日文)
+    from .fanza import Fanza
+    try:
+        fanzaEngine = Fanza()
+        fanzaEngine.init()
+        fanzaEngine.updateCore(core=None)
+        fanzaEngine.proxies = proxies
+        fanzaEngine.verify = verify
+        jsons = fanzaEngine.search(number)
+        if not jsons or jsons == 404:
+            raise ValueError("number not found on FANZA")
+        outline = json.loads(jsons).get('outline')
+        return outline
+    except Exception as e:
+        if debug:
+            print(f"[-]MP getStoryline_fanza Error: {e}, number [{number}].")
+        pass
+    return ''
+
+
+def getStoryline_mgstage(number, debug, proxies, verify):  # 获取剧情介绍 从 MGStage 取得(日文)
+    from .mgstage import Mgstage
+    try:
+        mgstageEngine = Mgstage()
+        mgstageEngine.init()
+        mgstageEngine.updateCore(core=None)
+        mgstageEngine.proxies = proxies
+        mgstageEngine.verify = verify
+        jsons = mgstageEngine.search(number)
+        if not jsons or jsons == 404:
+            raise ValueError("number not found on MGStage")
+        outline = json.loads(jsons).get('outline')
+        return outline
+    except Exception as e:
+        if debug:
+            print(f"[-]MP getStoryline_mgstage Error: {e}, number [{number}].")
         pass
     return ''

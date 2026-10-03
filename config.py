@@ -15,10 +15,10 @@ G_conf_override = {
 }
 
 
-def getInstance():
+def getInstance(path: str = None):
     if isinstance(G_conf_override[0], Config):
         return G_conf_override[0]
-    return Config()
+    return Config(path) if path else Config()
 
 
 class Config:
@@ -59,7 +59,7 @@ class Config:
         else:
             print("ERROR: Config file not found!")
             print("Please put config file into one of the following path:")
-            print('\n'.join([str(p.resolve()) for p in path_search_order[2:]]))
+            print('\n'.join([str(p.resolve()) for p in path_search_order[1:]]))
             # 对于找不到配置文件的情况，还是在打包时附上对应版本的默认配置文件，有需要时为其在搜索路径中生成，
             # 要比用户乱找一个版本不对应的配置文件会可靠些。这样一来，单个执行文件就是功能完整的了，放在任何
             # 执行路径下都可以放心使用。
@@ -392,19 +392,19 @@ class Config:
         try:
             return self.conf.get("storyline", "site")
         except:
-            return "1:avno1,4:airavwiki"
+            return "fanza,avno1,airavwiki"
 
     def storyline_censored_site(self) -> str:
         try:
             return self.conf.get("storyline", "censored_site")
         except:
-            return "2:airav,5:xcity,6:amazon"
+            return "fanza,airav,xcity"
 
     def storyline_uncensored_site(self) -> str:
         try:
             return self.conf.get("storyline", "uncensored_site")
         except:
-            return "3:58avgo"
+            return "58avgo"
 
     def storyline_show(self) -> int:
         v = self.conf.getint("storyline", "show_result", fallback=0)
@@ -412,6 +412,13 @@ class Config:
 
     def storyline_mode(self) -> int:
         return 1 if self.conf.getint("storyline", "run_mode", fallback=1) > 0 else 0
+
+    def storyline_prefer_jp(self) -> bool:
+        """是否优先使用靠前站点(如fanza)的日文剧情简介"""
+        try:
+            return self.conf.getboolean("storyline", "prefer_jp")
+        except:
+            return False
 
     def cc_convert_mode(self) -> int:
         v = self.conf.getint("cc_convert", "mode", fallback=1)
@@ -554,9 +561,10 @@ class Config:
         sec15 = "storyline"
         conf.add_section(sec15)
         conf.set(sec15, "switch", "1")
-        conf.set(sec15, "site", "1:avno1,4:airavwiki")
-        conf.set(sec15, "censored_site", "2:airav,5:xcity,6:amazon")
-        conf.set(sec15, "uncensored_site", "3:58avgo")
+        conf.set(sec15, "site", "fanza,avno1,airavwiki")
+        conf.set(sec15, "censored_site", "fanza,airav,xcity")
+        conf.set(sec15, "uncensored_site", "58avgo")
+        conf.set(sec15, "prefer_jp", "1")
         conf.set(sec15, "show_result", "0")
         conf.set(sec15, "run_mode", "1")
         conf.set(sec15, "cc_convert", "1")

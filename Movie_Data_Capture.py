@@ -45,6 +45,8 @@ def argparse_function(ver: str) -> typing.Tuple[str, str, str, str, bool, bool, 
                         help="Main mode. 1:Scraping 2:Organizing 3:Scraping in analysis folder")
     parser.add_argument("-n", "--number", default='', nargs='?', help="Custom file number of single movie file.")
     # parser.add_argument("-C", "--config", default='config.ini', nargs='?', help="The config file Path.")
+    parser.add_argument("--config-file", dest='config_file', default='', nargs='?',
+                        help="Specify the config file path, switch between multiple project configs (eg. config_A.ini). Handled before config load.")
     parser.add_argument("-L", "--link-mode", default='', nargs='?',
                         help="Create movie file link. 0:moving movie file, do not create link 1:soft link 2:try hard link first")
     default_logdir = str(Path.home() / '.mlogs')
@@ -709,8 +711,21 @@ if __name__ == '__main__':
     urllib3.disable_warnings()  # Ignore http proxy warning
     app_start = time.time()
 
+    # 项目切换配置文件：支持 --config-file <path> 指定配置文件，
+    # 便于为不同项目/场景保存多份配置(如 config_A.ini / config_B.ini)并按需切换。
+    # 必须在 config.getInstance() 之前处理，因为它决定了随后加载哪一份配置。
+    _conf_path = None
+    _argv = sys.argv[1:]
+    for _idx, _arg in enumerate(_argv):
+        if _arg == "--config-file" and _idx + 1 < len(_argv):
+            _conf_path = _argv[_idx + 1]
+            break
+        elif _arg.startswith("--config-file="):
+            _conf_path = _arg.split("=", 1)[1]
+            break
+
     # Read config.ini first, in argparse_function() need conf.failed_folder()
-    conf = config.getInstance()
+    conf = config.getInstance(_conf_path)
 
     # Parse command line args
     args = tuple(argparse_function(version))
