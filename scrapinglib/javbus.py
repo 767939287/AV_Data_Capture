@@ -2,11 +2,32 @@
 
 import re
 import os
-import secrets
 import inspect
+import config
 from lxml import etree
 from urllib.parse import urljoin
 from .parser import Parser
+
+
+# javbus 主站/镜像默认域名（可在 config.ini 的 [javbus] domain / mirror 修改）
+_DEFAULT_DOMAIN = "https://www.javbus.com"
+_DEFAULT_MIRROR = "https://www.buscdn.casa"
+
+
+def _get_domain() -> str:
+    """读取 javbus 域名；配置缺失/异常时回退默认主站。"""
+    try:
+        return config.getInstance().javbus_domain().rstrip("/")
+    except Exception:
+        return _DEFAULT_DOMAIN
+
+
+def _get_mirror() -> str:
+    """读取 javbus 备用镜像域名；配置缺失/异常时回退默认镜像。"""
+    try:
+        return config.getInstance().javbus_mirror().rstrip("/")
+    except Exception:
+        return _DEFAULT_MIRROR
 
 
 class Javbus(Parser):
@@ -47,12 +68,10 @@ class Javbus(Parser):
                     newnumber = "DV-1195_2010-10-08"
                 if number == "BKD-003" :
                     newnumber = "BKD-003_2009-09-05"                     
-                self.detailurl = 'https://www.javbus.com/' + newnumber
+                self.detailurl = _get_domain() + "/" + newnumber
                 self.htmlcode = self.getHtml(self.detailurl)
             except:
-                mirror_url = "https://www." + secrets.choice([
-                    'buscdn.art',
-                ]) + "/"
+                mirror_url = _get_mirror() + "/"
                 self.detailurl = mirror_url + number
                 self.htmlcode = self.getHtml(self.detailurl)
             if self.htmlcode == 404:
@@ -74,7 +93,7 @@ class Javbus(Parser):
         if self.specifiedUrl:
             self.detailurl = self.specifiedUrl
         else:
-            self.detailurl = 'https://www.javbus.com/' + w_number
+            self.detailurl = _get_domain() + "/" + w_number
         self.htmlcode = self.getHtml(self.detailurl)
         if self.htmlcode == 404:
             return 404
@@ -103,7 +122,7 @@ class Javbus(Parser):
             return self.getTreeElement(htmltree, self.expr_studio)
 
     def getCover(self, htmltree):
-        return urljoin("https://www.javbus.com", super().getCover(htmltree))
+        return urljoin(_get_domain(), super().getCover(htmltree))
 
     def getRuntime(self, htmltree):
         return super().getRuntime(htmltree).strip(" ['']分鐘")
@@ -123,7 +142,7 @@ class Javbus(Parser):
             if "nowprinting.gif" in p:
                 continue
             t = i.attrib['title']
-            d[t] = urljoin("https://www.javbus.com", p)
+            d[t] = urljoin(_get_domain(), p)
         return d
 
     def getDirector(self, htmltree):

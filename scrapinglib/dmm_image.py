@@ -105,11 +105,56 @@ def _to_portrait(url: str) -> str:
     return ""
 
 
-def _valid_image(url: str, proxies=None, verify=None) -> bool:
-    """用 HEAD 请求校验图片是否存在且为图片。
+# DMM 高清图最小宽度阈值：awsimgsrc 同一 URL 格式下可能返回 147x200 缩略图，
+# 仅靠 HEAD/Content-Length 无法区分，需读分辨率过滤（参考 MDCx 的 _is_dmm_hd_image）。
+_DMM_HD_MIN_WIDTH = 700
+
+
+def _parse_image_size(data: bytes):
+    """从图片字节流解析 (width, height)，支持 JPEG 与 PNG。解析失败返回 (0, 0)。"""
+    if not data or len(data) < 24:
+        return 0, 0
+    try:
+        # PNG: 签名 8 字节后为 IHDR，宽高各 4 字节大端（偏移 16/20）
+        if data[:8] == b"\x89PNG\r\n\x1a\n":
+            w = int.from_bytes(data[16:20], "big")
+            h = int.from_bytes(data[20:24], "big")
+            return w, h
+        # JPEG: 扫描 SOF 段（0xFFC0-0xFFCF，排除 C4/C8/CC）
+        if data[:2] == b"\xff\xd8":
+            i = 2
+            n = len(data)
+            while i + 9 < n:
+                if data[i] != 0xFF:
+                    i += 1
+                    continue
+                marker = data[i + 1]
+                # SOF0..SOF15（不含 DHT=0xC4, JPG=0xC8, DAC=0xCC）
+                if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                    h = int.from_bytes(data[i + 5:i + 7], "big")
+                    w = int.from_bytes(data[i + 7:i + 9], "big")
+                    return w, h
+                if marker in (0xD8, 0xD9) or 0xD0 <= marker <= 0xD7:
+                    i += 2
+                    continue
+                seg_len = int.from_bytes(data[i + 2:i + 4], "big")
+                if seg_len < 2:
+                    break
+                i += 2 + seg_len
+            return 0, 0
+    except Exception:
+        return 0, 0
+    return 0, 0
+
+
+def _valid_image(url: str, proxies=None, verify=None, check_hd: bool = False) -> bool:
+    """校验图片是否存在且有效。
 
     DMM 对不存在的图通常返回 404；此处同时过滤 Content-Type 非图片、
     以及体积极小的占位图（<4KB）。
+
+    check_hd=True 时额外读取图片分辨率，宽 < 700 视为缩略图/占位图拒收
+    （参考 MDCx：awsimgsrc 同一 URL 可能返回 147x200 缩略图，需按尺寸过滤）。
     """
     try:
         resp = httprequest.get(url, return_type="object", retry=1, timeout=8,
@@ -124,6 +169,13 @@ def _valid_image(url: str, proxies=None, verify=None) -> bool:
         length = resp.headers.get("Content-Length")
         if length is not None and str(length).isdigit() and int(length) < 4096:
             return False
+        if check_hd:
+            # 读取前若干字节解析分辨率（JPEG 的 SOF 段通常在前几 KB 内）
+            data = httprequest.get(url, return_type="content", retry=1, timeout=8,
+                                   proxies=proxies, verify=verify)
+            width, _height = _parse_image_size(data or b"")
+            if width and width < _DMM_HD_MIN_WIDTH:
+                return False
         return True
     except Exception:
         return False
@@ -161,7 +213,7 @@ def upgrade_cover(url: str, proxies=None, verify=None) -> str:
         # 已是 awsimgsrc 高清图，仅尝试统一为横版
         if "awsimgsrc.dmm.co.jp" in original:
             landscape = _to_landscape(original)
-            if landscape and _valid_image(landscape, proxies=proxies, verify=verify):
+            if landscape and _valid_image(landscape, proxies=proxies, verify=verify, check_hd=True):
                 return landscape
         return url
     candidates = _dedupe([
@@ -169,7 +221,7 @@ def upgrade_cover(url: str, proxies=None, verify=None) -> str:
         aws,                 # 竖版高清
     ])
     for candidate in candidates:
-        if _valid_image(candidate, proxies=proxies, verify=verify):
+        if _valid_image(candidate, proxies=proxies, verify=verify, check_hd=True):
             return candidate
     return url
 
@@ -187,10 +239,10 @@ def upgrade_poster(url: str, proxies=None, verify=None) -> str:
         # 已是 awsimgsrc 高清图，仅确保竖版
         if "awsimgsrc.dmm.co.jp" in original:
             portrait = _to_portrait(original)
-            if portrait and _valid_image(portrait, proxies=proxies, verify=verify):
+            if portrait and _valid_image(portrait, proxies=proxies, verify=verify, check_hd=True):
                 return portrait
         return url
-    if _valid_image(aws, proxies=proxies, verify=verify):
+    if _valid_image(aws, proxies=proxies, verify=verify, check_hd=True):
         return aws
     return url
 
@@ -223,21 +275,25 @@ def _normalize_number(number: str) -> str:
 def _cid_candidates_from_number(number: str):
     """由番号直接推导可能的 DMM cid 候选（无需搜索即可命中的常见情况）。
 
-    规则（参考 DMM 站内编号）：
-      - 前缀+数字：'ssis-200' -> 'ssis00200'（数字补零到 5 位）
-      - 无横杠形态：'ssis200'
-    仅作为搜索解析失败时的兜底，最终仍以搜索页解析出的 cid 为准。
+    优先使用 dmm_prefix 前缀表（可处理带厂牌前缀的 cid，如 abf123 -> 436abf00123），
+    再保留「前缀+补零 / 无横杠」兜底形态。最终仍以搜索页解析出的 cid 为准。
     """
     normalized = _normalize_number(number)
     if not normalized:
         return []
     candidates = []
+    # 1) 前缀表候选（覆盖特殊厂牌前缀）
+    try:
+        from .dmm_prefix import cid_candidates
+        candidates.extend(cid_candidates(normalized))
+    except Exception:
+        pass
+    # 2) 兜底：前缀+数字补零到5位 / 无横杠形态
     m = re.match(r"^([a-z]+)-?(\d+)$", normalized)
     if m:
         prefix, digits = m.group(1), m.group(2)
         candidates.append(f"{prefix}{int(digits):05d}")  # ssis + 00200
-    no_dash = normalized.replace("-", "")
-    candidates.append(no_dash)
+    candidates.append(normalized.replace("-", ""))
     # 去重保序
     seen = set()
     result = []
@@ -310,13 +366,13 @@ def cross_source_cover(number: str, proxies=None, verify=None) -> str:
     for cid in _cid_candidates_from_number(number):
         for suffix in ("pl", "ps"):  # 横版优先
             candidate = _AWS_COVER_TMPL.format(cid=cid, suffix=suffix)
-            if _valid_image(candidate, proxies=proxies, verify=verify):
+            if _valid_image(candidate, proxies=proxies, verify=verify, check_hd=True):
                 return candidate
     # 2) 走 DMM 搜索页拿到真实 cid（覆盖特殊前缀/组合系列）
     cid = get_dmm_cid(number, proxies=proxies, verify=verify)
     if cid:
         for suffix in ("pl", "ps"):
             candidate = _AWS_COVER_TMPL.format(cid=cid, suffix=suffix)
-            if _valid_image(candidate, proxies=proxies, verify=verify):
+            if _valid_image(candidate, proxies=proxies, verify=verify, check_hd=True):
                 return candidate
     return ""

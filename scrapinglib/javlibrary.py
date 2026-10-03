@@ -1,8 +1,21 @@
 # -*- coding: utf-8 -*-
 
 from lxml import etree
+import config
 from .httprequest import request_session
 from .parser import Parser
+
+
+# javlibrary 主站默认域名（镜像失效时可在 config.ini 的 [javlibrary] domain 修改）
+_DEFAULT_DOMAIN = "https://www.javlibrary.com"
+
+
+def _get_domain() -> str:
+    """读取 javlibrary 域名；配置缺失/异常时回退默认主站。"""
+    try:
+        return config.getInstance().javlibrary_domain().rstrip("/")
+    except Exception:
+        return _DEFAULT_DOMAIN
 
 
 class Javlibrary(Parser):
@@ -50,7 +63,8 @@ class Javlibrary(Parser):
         return result
 
     def queryNumberUrl(self, number: str):
-        queryUrl = "https://www.a95i.com/tw/vl_searchbyid.php?keyword=" + number
+        domain = _get_domain()
+        queryUrl = domain + "/tw/vl_searchbyid.php?keyword=" + number
         queryResult = self.session.get(queryUrl)
 
         if queryResult and "/?v=jav" in queryResult.url:
@@ -62,7 +76,7 @@ class Javlibrary(Parser):
             if number in numbers:
                 urls = queryTree.xpath('//div[@class="id"]/../@href')
                 detailurl = urls[numbers.index(number)]
-                return "https://www.a95i.com/tw" + detailurl.strip('.')
+                return domain + "/tw" + detailurl.strip('.')
         return None
 
     def getTitle(self, htmltree):

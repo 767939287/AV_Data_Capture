@@ -31,6 +31,29 @@ class Fanza(Parser):
             self.htmltree = self.getHtmlTree(durl)
             result = self.dictformat(self.htmltree)
             return result
+
+        # 1) 优先走 DMM 官方 Affiliate API（稳定、结构化；FANZA 即 DMM 成人品牌，内容同源）。
+        #    失败（无凭据/无匹配/网络异常）时回退到下面的详情页爬取。
+        try:
+            from .dmm_api import search_by_number as _dmm_api_search_by_number
+            api_data = _dmm_api_search_by_number(number, proxies=self.proxies, verify=self.verify)
+            if api_data and (api_data.get("title") or api_data.get("cover")):
+                # API 无简介；需要更多剧情时由 storyline 在 getOutline 阶段补充
+                if getattr(self, "morestoryline", False):
+                    try:
+                        from .storyline import getStoryline
+                        more = getStoryline(api_data.get("number", number),
+                                            uncensored=getattr(self, "uncensored", False),
+                                            proxies=self.proxies, verify=self.verify)
+                        if isinstance(more, str) and len(more):
+                            api_data["outline"] = more
+                    except Exception:
+                        pass
+                return json.dumps(api_data, ensure_ascii=False, sort_keys=True,
+                                  separators=(',', ':'))
+        except Exception:
+            pass
+
         # fanza allow letter + number + underscore, normalize the input here
         # @note: I only find the usage of underscore as h_test123456789
         fanza_search_number = number
@@ -73,12 +96,24 @@ class Fanza(Parser):
     def _cid_candidates(fanza_search_number):
         """根据番号生成 DMM/FANZA 可能的 cid 候选（保持优先级顺序，去重）。
 
-        DMM 的 cid 数字部分统一补零到 5 位：
-            abf123  -> ['abf123', 'abf00123']   # 原样先试，再补零
-            ssis001 -> ['ssis001', 'ssis00001']
-            stars1  -> ['stars1', 'stars00001']
+        参考 MDCx 的做法：DMM 的 cid 不仅「前缀+编号补零到5位」一种形态，
+        不同厂牌有各自的前缀，例如：
+            ssis200 -> ssis00200
+            abf123  -> 436abf00123   (前缀 '436')
+            milk123 -> h_1240milk00123 (前缀 'h_1240')
+            t28_645 -> 55t2800645    (前缀 '55')
+        因此优先用 dmm_prefix 的前缀表生成候选，并保留「原样 / 补零」兜底。
         """
         candidates = [fanza_search_number]
+        # 1) 前缀表候选（覆盖特殊厂牌前缀，如 436abf00123 / h_1240milk00123）
+        try:
+            from .dmm_prefix import cid_candidates
+            for cid in cid_candidates(fanza_search_number):
+                if cid not in candidates:
+                    candidates.append(cid)
+        except Exception:
+            pass
+        # 2) 兜底：原样 -> 前缀+数字补零到5位
         m = re.match(r'^([a-z]+)(\d+)$', fanza_search_number)
         if m:
             prefix, digits = m.groups()
@@ -163,7 +198,15 @@ class Fanza(Parser):
         return result
 
     def getRuntime(self, htmltree):
-        return str(re.search(r'\d+', super().getRuntime(htmltree)).group()).strip(" ['']")
+        # 収録時間 字段可能缺失或其结构变化，此时 super().getRuntime() 返回空串，
+        # re.search(r'\d+', '') 会得到 None，直接 .group() 会抛
+        # AttributeError: 'NoneType' object has no attribute 'group'，
+        # 导致整个 dictformat 失败、说明与简介全丢。这里做判空保护。
+        raw = super().getRuntime(htmltree)
+        m = re.search(r'\d+', raw or '')
+        if not m:
+            return ''
+        return str(m.group()).strip(" ['']")
 
     def getDirector(self, htmltree):
         if "anime" not in self.detailurl:

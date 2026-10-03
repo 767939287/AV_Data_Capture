@@ -406,6 +406,32 @@ class Config:
         except Exception:
             return False
 
+    def dmm_api_switch(self) -> bool:
+        """DMM 官方 Affiliate API 开关。
+
+        [dmm_api] switch: 1 开启（fanza 源优先走官方 API，失败回退详情页），
+                          0 关闭（默认，fanza 仅爬详情页）。
+        段/键缺失或非法时返回 False，保证关闭时零副作用。
+        """
+        try:
+            return self.conf.getboolean("dmm_api", "switch", fallback=False)
+        except Exception:
+            return False
+
+    def dmm_api_id(self) -> str:
+        """DMM Affiliate API 的 api_id（[dmm_api] api_id）。缺省时由 dmm_api.py 用默认值。"""
+        try:
+            return self.conf.get("dmm_api", "api_id", fallback="")
+        except Exception:
+            return ""
+
+    def dmm_affiliate_id(self) -> str:
+        """DMM Affiliate API 的 affiliate_id（[dmm_api] affiliate_id）。缺省时用默认值。"""
+        try:
+            return self.conf.get("dmm_api", "affiliate_id", fallback="")
+        except Exception:
+            return ""
+
     def is_storyline(self) -> bool:
         try:
             return self.conf.getboolean("storyline", "switch")
@@ -457,6 +483,45 @@ class Config:
 
     def javdb_sites(self) -> str:
         return self.conf.get("javdb", "sites", fallback="38,39")
+
+    def javlibrary_domain(self) -> str:
+        """javlibrary 主页/CDN 域名（[javlibrary] domain）。
+
+        默认 https://www.javlibrary.com；镜像失效时可随时改为主站或当前镜像，
+        例如 https://www.a95i.com。返回值去掉末尾斜杠。
+        """
+        try:
+            v = self.conf.get("javlibrary", "domain", fallback="")
+        except Exception:
+            v = ""
+        v = (v or "").strip().rstrip("/")
+        return v or "https://www.javlibrary.com"
+
+    def javbus_domain(self) -> str:
+        """javbus 主页/CDN 域名（[javbus] domain）。
+
+        默认 https://www.javbus.com；镜像失效时可随时改为当前可用镜像。
+        返回值去掉末尾斜杠。
+        """
+        try:
+            v = self.conf.get("javbus", "domain", fallback="")
+        except Exception:
+            v = ""
+        v = (v or "").strip().rstrip("/")
+        return v or "https://www.javbus.com"
+
+    def javbus_mirror(self) -> str:
+        """javbus 备用镜像域名（[javbus] mirror）。
+
+        当主站(domain)请求异常时使用的兜底镜像，默认 https://www.buscdn.casa。
+        返回值去掉末尾斜杠；留空则回退默认镜像。
+        """
+        try:
+            v = self.conf.get("javbus", "mirror", fallback="")
+        except Exception:
+            v = ""
+        v = (v or "").strip().rstrip("/")
+        return v or "https://www.buscdn.casa"
 
     def face_locations_model(self) -> str:
         return self.conf.get("face", "locations_model", fallback="hog")

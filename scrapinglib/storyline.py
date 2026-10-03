@@ -49,23 +49,37 @@ def getStoryline(number, title=None, sites: list = None, uncensored=None, proxie
     start_time = time.time()
     debug = config.getInstance().debug_storyline()
     print(f'[!]Getting storyline debug : {debug}')
-    storyine_sites = config.getInstance().storyline_site().split(",")  # "1:airav,4:airavwiki".split(',')
+    # 优先级规则（用户可在 config.ini 的 [storyline] 段一眼看懂并掌控）：
+    #   1) site 有值：完全按 site 的书写顺序决定优先级；censored_site/uncensored_site
+    #      仅作为“额外可用站点”补充到 site 之后（如 58avgo 这类无码专站），且不重复。
+    #   2) site 为空：退回原逻辑，用 censored_site/uncensored_site + site 的拼接顺序。
+    site_list = [s.strip() for s in config.getInstance().storyline_site().split(",") if s.strip()]
     if uncensored:
-        storyine_sites = config.getInstance().storyline_uncensored_site().split(",") + storyine_sites  # "3:58avgo".split(',')
+        extra_sites = [s.strip() for s in config.getInstance().storyline_uncensored_site().split(",") if s.strip()]
     else:
-        storyine_sites = config.getInstance().storyline_censored_site().split(",") + storyine_sites  # "2:airav,5:xcity".split(',')
+        extra_sites = [s.strip() for s in config.getInstance().storyline_censored_site().split(",") if s.strip()]
+    if site_list:
+        # site 有值：site 顺序优先，extra_sites 只补充 site 中未出现的站点（追加到末尾）
+        storyine_sites = site_list + [s for s in extra_sites if s not in site_list]
+    else:
+        # site 为空：保持原行为（extra_sites 在前 + site 在后）
+        storyine_sites = extra_sites + site_list
     r_dup = set()
     sort_sites = []
     for s in storyine_sites:
+        s = s.strip()
         if s in G_registered_storyline_site and s not in r_dup:
             sort_sites.append(s)
             r_dup.add(s)
-    # sort_sites.sort()
-    mp_args = ((site, number, title, debug, proxies, verify) for site in sort_sites)
+    # 用 list 而非生成器传给线程池，避免生成器+线程池潜在的顺序歧义
+    mp_args = [(site, number, title, debug, proxies, verify) for site in sort_sites]
     cores = min(len(sort_sites), os.cpu_count())
     if cores == 0:
         return ''
     run_mode = config.getInstance().storyline_mode()
+    if debug:
+        # 明确打印实际生效的优先级顺序，便于核对 config 是否按预期生效
+        print(f'[!]Storyline sites priority order: {sort_sites}')
     with ThreadPool(cores) if run_mode > 0 else noThread() as pool:
         results = pool.map(getStoryline_mp, mp_args)
     sel = ''
@@ -74,19 +88,21 @@ def getStoryline(number, title=None, sites: list = None, uncensored=None, proxie
     # 以下debug结果输出会写入日志
     s = f'[!]Storyline{G_mode_txt[run_mode]}模式运行{len(sort_sites)}个任务共耗时(含启动开销){time.time() - start_time:.3f}秒，结束于{time.strftime("%H:%M:%S")}'
     sel_site = ''
+    # 严格按 sort_sites 的顺序（即 config 中 censored_site/uncensored_site 在前、site 在后的声明顺序）选择：
+    #   prefer_jp=1: 取第一个有结果的站点（按顺序，即使为日文，如 fanza/mgstage）
+    #   prefer_jp=0: 优先第一个有结果的中文站点；若全是日文，则取第一个有结果的日文站点兜底
     for site, desc in zip(sort_sites, results):
-        if isinstance(desc, str) and len(desc):
-            if prefer_jp:
-                # 站点列表顺序即优先级：取第一个有结果的简介（即使为日文，如 fanza）
-                sel_site, sel = site, desc
-                break
-            if not is_japanese(desc):
-                # 优先选择中文简介
-                sel_site, sel = site, desc
-                break
-            if not len(sel_site):
-                # 全是日文简介时，取第一个日文结果兜底
-                sel_site, sel = site, desc
+        if not (isinstance(desc, str) and len(desc)):
+            continue
+        if prefer_jp:
+            sel_site, sel = site, desc
+            break
+        if not is_japanese(desc):
+            sel_site, sel = site, desc
+            break
+        if not len(sel_site):
+            # 记录第一个日文结果作为兜底，继续往后找是否有中文结果
+            sel_site, sel = site, desc
     for site, desc in zip(sort_sites, results):
         sl = len(desc) if isinstance(desc, str) else 0
         s += f'，[选中{site}字数:{sl}]' if site == sel_site else f'，{site}字数:{sl}' if sl else f'，{site}:空'
