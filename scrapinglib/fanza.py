@@ -64,40 +64,52 @@ class Fanza(Parser):
         # 而 AV_Data_Capture 传入的番号多为去掉连字符的短格式(如 abf123)，
         # 直接拼 cid 会 404，因此这里生成候选 cid 依次尝试。
         for fanza_cid in self._cid_candidates(fanza_search_number):
+            # 地区限制是「全站统一」的：一旦命中，其余 cid/URL 必然同样被拦，
+            # 立即跳出全部循环去走 API，避免无谓的几十次请求拖慢速度。
+            region_blocked = False
             for url in fanza_urls:
                 self.detailurl = url + fanza_cid
                 req_url = "https://www.dmm.co.jp/age_check/=/declared=yes/?"+ urlencode({"rurl": self.detailurl})
-                self.htmlcode = self.getHtml(req_url)
-                if self.htmlcode != 404 \
-                        and 'Sorry! This content is not available in your region.' not in self.htmlcode:
-                    self.htmltree = etree.HTML(self.htmlcode)
-                    if self.htmltree is not None:
-                        result = self.dictformat(self.htmltree)
-                        # dictformat 解析失败时会返回 title 为空的破数据，
-                        # 此时不立即返回，继续尝试下一个 cid/URL（如 digital->mono 等不同版位）。
-                        try:
-                            if json.loads(result).get("title"):
-                                return result
-                        except Exception:
-                            pass
+                self.htmlcode = self.getHtml(req_url, retry=1)
+                if self.htmlcode == 404:
+                    continue
+                if self._is_region_blocked(self.htmlcode):
+                    region_blocked = True
+                    break
+                self.htmltree = etree.HTML(self.htmlcode)
+                if self.htmltree is not None:
+                    result = self.dictformat(self.htmltree)
+                    # dictformat 解析失败时会返回 title 为空的破数据，
+                    # 此时不立即返回，继续尝试下一个 URL（如 digital->mono 等不同版位）。
+                    try:
+                        if json.loads(result).get("title"):
+                            return result
+                    except Exception:
+                        pass
+            if region_blocked:
+                break
 
-        # 2) 详情页全部失败（地区限制/下架/改版等）后，最后兜底再试一次官方 API。
-        #    注意：即便 [dmm_api] switch 关闭，这里也强制尝试一次（详情页已全军覆没）。
-        api_result = self._search_by_api(number, force=True)
-        if api_result is not None:
-            return api_result
         return 404
 
-    def _search_by_api(self, number, force=False):
+    @staticmethod
+    def _is_region_blocked(html):
+        """判断返回页是否为 DMM 地区限制页（全站统一，命中即无需再试其它 URL）。"""
+        if not html:
+            return False
+        return ('Sorry! This content is not available in your region.' in html
+                or 'This content is not available in your region' in html
+                or 'お住まいの地域' in html)
+
+    def _search_by_api(self, number):
         """走 DMM 官方 Affiliate API，返回 JSON 字符串；不可用/无匹配返回 None。
 
-        force=True 时忽略 [dmm_api] switch 开关强制尝试（用于详情页失败后的兜底）。
-        任何异常都返回 None，由调用方决定后续回退。
+        是否调用完全由 [dmm_api] switch 决定（在 dmm_api.search_by_number 内判断）。
+        任何异常都返回 None，由调用方回退到详情页。
         """
         try:
             from .dmm_api import search_by_number as _dmm_api_search_by_number
             api_data = _dmm_api_search_by_number(number, proxies=self.proxies,
-                                                 verify=self.verify, force=force)
+                                                 verify=self.verify)
             if not api_data or not (api_data.get("title") or api_data.get("cover")):
                 return None
             # API 无简介；需要更多剧情时由 storyline 在 getOutline 阶段补充

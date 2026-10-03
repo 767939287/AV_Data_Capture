@@ -118,10 +118,16 @@ class Parser:
         url = "http://detailurl.ai/" + number
         return url
 
-    def getHtml(self, url, type=None):
+    def getHtml(self, url, type=None, retry=3, timeout=None):
         """ 访问网页
+
+        retry: 请求失败重试次数。探测类请求可传较小值(如1)以加快失败返回。
+        timeout: 覆盖默认超时(秒)，探测类请求可传较小值避免长时间等待。
         """
-        resp = httprequest.get(url, cookies=self.cookies, proxies=self.proxies, extra_headers=self.extraheader, verify=self.verify, return_type=type)
+        kwargs = {}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        resp = httprequest.get(url, cookies=self.cookies, proxies=self.proxies, extra_headers=self.extraheader, verify=self.verify, return_type=type, retry=retry, **kwargs)
         if '<title>404 Page Not Found' in resp \
                 or '<title>未找到页面' in resp \
                 or '404 Not Found' in resp \
