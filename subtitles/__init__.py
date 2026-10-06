@@ -29,19 +29,29 @@ def download_subtitles(filepath, path, multi_part, number, part, leak_word, c_wo
         if not subtitle_links:
             print("未找到字幕链接")
             return False
-        # 依次尝试每个候选字幕页面，直到有任意一个语言版本成功下载。
-        # open_download 会尽可能把 zh-CN 与 zh-TW 两个版本都下载下来。
+        # 遍历所有候选字幕页面，尽量把简繁两个版本都下全：
+        # 某些候选页只有繁中、另一些只有简中，因此不能遇到第一个能下的页就停止，
+        # 而应记录已下载的语言，继续在后续候选页中补齐尚未拿到的语言。
+        done_langs = set()
         for subtitle_link in subtitle_links:
-            if open_download(subtitle_link,path,number,leak_word,c_word,hack_word):
-                return True
-        
-        return False
+            done_langs |= open_download(subtitle_link, path, number, leak_word, c_word, hack_word, done_langs)
+            # 简繁都已经拿到，无需再继续尝试其它候选页
+            if {'zh-CN', 'zh-TW'} <= done_langs:
+                break
+
+        return len(done_langs) > 0
         
     except Exception as e:
         print(f"错误: {e}")
         return False
     
-def open_download(subtitle_link,path,number,leak_word,c_word,hack_word):
+def open_download(subtitle_link,path,number,leak_word,c_word,hack_word, done_langs=None):
+    """访问单个候选字幕页，下载其中尚未获取到的 zh-CN / zh-TW 版本。
+
+    返回本次成功下载的语言集合（set），供调用方累计去重。
+    """
+    if done_langs is None:
+        done_langs = set()
     print(f"找到字幕链接: {subtitle_link}")
     subtitle_page_url = f"https://subtitlecat.com/{subtitle_link}"
     config_proxy = config.getInstance().proxy()
@@ -54,16 +64,18 @@ def open_download(subtitle_link,path,number,leak_word,c_word,hack_word):
 
     print(f"访问字幕页面: {subtitle_page_url}, 状态码: {subtitle_response.status_code}")
     if subtitle_response.status_code != 200:
-        return False
+        return set()
     tree = html.fromstring(subtitle_response.content)
 
-    # zh-CN 和 zh-TW 两个语言版本都收集，若都存在则一起下载。
+    # zh-CN 和 zh-TW 两个语言版本都收集，若都存在则一起下载（已下过的语言跳过）。
     languages = (
         ('zh-CN', '//div[@class="sub-single"]/span/a[contains(@href, "zh-CN.srt")]/@href'),
         ('zh-TW', '//div[@class="sub-single"]/span/a[contains(@href, "zh-TW.srt")]/@href'),
     )
     download_targets = []
     for lang, xpath in languages:
+        if lang in done_langs:
+            continue
         links = tree.xpath(xpath)
         if links:
             download_targets.append((lang, links[0]))
@@ -71,14 +83,45 @@ def open_download(subtitle_link,path,number,leak_word,c_word,hack_word):
             print(f"未找到{lang}字幕下载链接")
 
     if not download_targets:
-        return False
+        return set()
 
-    success = False
+    success_langs = set()
     for lang, download_link in download_targets:
         if _download_one(subtitle_page_url, download_link, path, number, leak_word, c_word, hack_word,
                          f"{lang}.srt"):
-            success = True
-    return success
+            success_langs.add(lang)
+    return success_langs
+
+
+def _is_valid_subtitle(content: bytes) -> bool:
+    """校验下载到的内容是否为真正的字幕，而不是 404 错误页 / HTML / nginx 报错页。
+
+    判定规则：
+    1) 不能包含 HTML 页面特征（<html>、<head>、<body>、404 Not Found、nginx 等）；
+    2) 必须包含 SRT/VTT 的时间轴标记 "-->".
+    """
+    # 统一按 utf-8 解码，忽略无法解码的字节，兼容 gbk 等编码的报错页
+    try:
+        text = content.decode("utf-8", errors="ignore")
+    except Exception:
+        text = ""
+    head = text[:2048].lower()
+    body = text.lower()
+
+    # 1) HTML / 报错页特征：只看开头，避免字幕正文偶尔出现的单词被误判。
+    #    不使用裸 "404"，因为正文台词里可能恰好含 "404"，只认明确的 404 报错文案。
+    if any(m in head for m in ("<html", "<head", "<body", "<title", "nginx",
+                               "404 not found", "404找不到", "404 未找到")):
+        return False
+    # 正文中兜底检测明显的 404 提示
+    if any(m in body for m in ("404 not found", "404找不到", "404 未找到")):
+        return False
+
+    # 2) 必须含有字幕时间轴标记
+    if "-->" not in text:
+        return False
+
+    return True
 
 
 def _download_one(subtitle_page_url, download_link, path, number, leak_word, c_word, hack_word, ext) -> bool:
@@ -105,19 +148,9 @@ def _download_one(subtitle_page_url, download_link, path, number, leak_word, c_w
         return False
 
     content = subtitle_response.content
-    # 检测 404 页面：站点返回的 404 页标题形如 "404找不到"（无空格），
-    # 也有 "404 Not Found / 404 未找到" 等变体，不能只比对单一中文字符串，
-    # 否则会漏判并把整段 html 当成字幕写入 .srt 文件（即用户看到的“内容显示404”）。
-    head = content[:2048].lower()
-    is_404 = (
-        b"404 not found" in head
-        or b"<title>404" in head
-        or "404找不到".encode("utf-8") in content
-        or "404 未找到".encode("utf-8") in content
-        or "404找不到".encode("gbk", errors="ignore") in content
-    )
-    if is_404:
-        print(f"字幕文件下载失败({ext}): 服务器返回 404 页面")
+    # 下载完毕后检查：确认拿到的是真正的字幕，而不是 404 / HTML / nginx 报错页。
+    if not _is_valid_subtitle(content):
+        print(f"字幕文件下载失败({ext}): 内容不是有效字幕（可能是 404 或 HTML 错误页）")
         return False
 
     sub_targetpath = Path(path) / f"{number}{leak_word}{c_word}{hack_word}.{ext}"
