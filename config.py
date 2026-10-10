@@ -207,6 +207,19 @@ class Config:
     def nfo_skip_days(self) -> int:
         return self.conf.getint("common", "nfo_skip_days", fallback=30)
 
+    def skip_nfo_check_in_subtitle_mode(self) -> bool:
+        """只下载字幕模式(main_mode=4)是否跳过 nfo_skip_days 检查。
+
+        [common] skip_nfo_check_in_subtitle_mode:
+          - 1（默认）：跳过 nfo_skip_days 检查，对源目录下所有视频都尝试下载字幕；
+          - 0：执行 nfo_skip_days 检查，跳过最近 nfo_skip_days 天内修改过 .nfo 的视频。
+        段/键缺失或非法时返回 True，保持默认行为（全部尝试下载字幕）。
+        """
+        try:
+            return self.conf.getboolean("common", "skip_nfo_check_in_subtitle_mode", fallback=True)
+        except Exception:
+            return True
+
     def ignore_failed_list(self) -> bool:
         return self.conf.getboolean("common", "ignore_failed_list")
 
@@ -222,6 +235,50 @@ class Config:
         except Exception:
             return "===="
         return v if isinstance(v, str) else "===="
+
+    def _resolve_list_path(self, key: str, default_filename: str):
+        """解析列表文件路径（[common] key）。
+
+        规则（失败/成功列表通用）：
+          - 留空：返回 None（由调用方决定各自默认：failed 沿用失败目录，success 表示不生成）；
+          - 若为目录（无 .txt 后缀或以分隔符结尾）：返回 <目录>/<default_filename>；
+          - 若以 .txt 结尾：视为完整文件路径，直接返回。
+        """
+        try:
+            raw = self.conf.get("common", key, fallback="")
+        except Exception:
+            return None
+        raw = (raw or "").strip().replace("\\\\", "/").replace("\\", "/")
+        if not raw:
+            return None
+        if raw.lower().endswith(".txt"):
+            return Path(raw)
+        return Path(raw) / default_filename
+
+    def failed_list_file(self) -> Path:
+        """失败列表(failed_list.txt)的最终路径（[common] failed_list_path）。
+
+        用于记录“刮削/下载过程中出错”的文件（有番号、有数据，但中途失败）。
+        留空 → failed_folder/failed_list.txt（向后兼容）；
+        填目录 → <目录>/failed_list.txt；填 *.txt 全路径 → 直接使用该文件。
+        """
+        p = self._resolve_list_path("failed_list_path", "failed_list.txt")
+        if p is None:
+            return Path(self.failed_folder()) / "failed_list.txt"
+        return p
+
+    def unrecognized_list_file(self) -> Path:
+        """无法识别列表(unrecognized_list.txt)的最终路径（[common] unrecognized_list_path）。
+
+        记录“没能进入正常刮削流程”的文件：番号识别失败(文件名提取不出番号) +
+        数据源查无数据(not found)。与真正的刮削失败(failed_list)分开，便于人工排查番号。
+        留空 → failed_folder/unrecognized_list.txt（向后兼容）；
+        填目录 → <目录>/unrecognized_list.txt；填 *.txt 全路径 → 直接使用该文件。
+        """
+        p = self._resolve_list_path("unrecognized_list_path", "unrecognized_list.txt")
+        if p is None:
+            return Path(self.failed_folder()) / "unrecognized_list.txt"
+        return p
 
     def download_only_missing_images(self) -> bool:
         return self.conf.getboolean("common", "download_only_missing_images")
@@ -640,7 +697,10 @@ class Config:
         conf.set(sec1, "actor_gender", "female")
         conf.set(sec1, "del_empty_folder", "1")
         conf.set(sec1, "nfo_skip_days", "30")
+        conf.set(sec1, "skip_nfo_check_in_subtitle_mode", "1")
         conf.set(sec1, "ignore_failed_list", "0")
+        conf.set(sec1, "failed_list_path", "")
+        conf.set(sec1, "unrecognized_list_path", "")
         conf.set(sec1, "download_only_missing_images", "1")
         conf.set(sec1, "mapping_table_validity", "7")
         conf.set(sec1, "jellyfin", "0")

@@ -31,8 +31,8 @@ def moveFailedFolder(filepath):
     link_mode = conf.link_mode()
     # 模式3或软连接，改为维护一个失败列表，启动扫描时加载用于排除该路径，以免反复处理
     # 原先的创建软连接到失败目录，并不直观，不方便找到失败文件位置，不如直接记录该文件路径
-    if conf.main_mode() == 3 or link_mode:
-        ftxt = os.path.abspath(os.path.join(failed_folder, 'failed_list.txt'))
+    if conf.main_mode() in (3, 4) or link_mode:
+        ftxt = str(conf.failed_list_file())
         # 追加写入失败路径，但**绝不删除/覆盖已有内容**（供分格、分批任务续跑）。
         # 若该路径已存在于列表中则跳过，避免重复追加；不存在才追加一行。
         try:
@@ -46,6 +46,10 @@ def moveFailedFolder(filepath):
             print("[-]Already in Failed List file, see '%s'" % ftxt)
             return
         print("[-]Add to Failed List file, see '%s'" % ftxt)
+        try:
+            os.makedirs(os.path.dirname(ftxt), exist_ok=True)
+        except Exception:
+            pass
         with open(ftxt, 'a', encoding='utf-8') as flt:
             flt.write(f'{filepath}\n')
     elif conf.failed_move() and not link_mode:
@@ -62,6 +66,37 @@ def moveFailedFolder(filepath):
             shutil.move(filepath, failed_name)
         except:
             print('[-]File Moving to FailedFolder unsuccessful!')
+
+
+def record_unrecognized(filepath):
+    """记录一个“未能进入正常刮削流程”的文件到无法识别列表([common] unrecognized_list_path)。
+
+    适用场景：番号识别失败(文件名提取不出番号) 或 数据源查无数据(not found)。
+    与真正的刮削失败(failed_list)分开，便于人工排查番号。
+
+    - 追加写入文件路径，**不删除/覆盖已有内容**；已存在则跳过，避免重复；
+    - 静默忽略写入异常，绝不影响正常流程。
+    """
+    conf = config.getInstance()
+    ulist = conf.unrecognized_list_file()
+    upath = str(ulist)
+    try:
+        existing = set()
+        if os.path.isfile(upath):
+            with open(upath, 'r', encoding='utf-8') as uf:
+                existing = set(uf.read().splitlines())
+        if filepath in existing:
+            print("[-]Already in Unrecognized List file, see '%s'" % upath)
+            return
+        print("[-]Add to Unrecognized List file, see '%s'" % upath)
+        try:
+            os.makedirs(os.path.dirname(upath), exist_ok=True)
+        except Exception:
+            pass
+        with open(upath, 'a', encoding='utf-8') as uf:
+            uf.write(f'{filepath}\n')
+    except Exception:
+        pass
 
 
 def get_info(json_data):  # 返回json里的数据
@@ -876,7 +911,8 @@ def core_main(movie_path, number_th, oCC, specified_source=None, specified_url=N
 
     # Return if blank dict returned (data not found)
     if not json_data:
-        moveFailedFolder(movie_path)
+        # 数据源查无数据(not found)：未能进入正常刮削流程，记入无法识别列表，便于人工排查番号
+        record_unrecognized(movie_path)
         return
 
     if json_data["number"] != number:

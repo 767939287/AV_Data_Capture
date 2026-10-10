@@ -21,7 +21,7 @@ from opencc import OpenCC
 from scraper import get_data_from_json
 from ADC_function import file_modification_days, get_html, parallel_download_files
 from number_parser import get_number
-from core import core_main, core_main_no_net_op, moveFailedFolder, debug_print
+from core import core_main, core_main_no_net_op, moveFailedFolder, record_unrecognized, debug_print
 
 
 def check_update(local_version):
@@ -42,7 +42,7 @@ def argparse_function(ver: str) -> typing.Tuple[str, str, str, str, bool, bool, 
     parser.add_argument("file", default='', nargs='?', help="Single Movie file path.")
     parser.add_argument("-p", "--path", default='', nargs='?', help="Analysis folder path.")
     parser.add_argument("-m", "--main-mode", default='', nargs='?',
-                        help="Main mode. 1:Scraping 2:Organizing 3:Scraping in analysis folder")
+                        help="Main mode. 1:Scraping 2:Organizing 3:Scraping in analysis folder 4:Download subtitles only")
     parser.add_argument("-n", "--number", default='', nargs='?', help="Custom file number of single movie file.")
     # parser.add_argument("-C", "--config", default='config.ini', nargs='?', help="The config file Path.")
     parser.add_argument("--config-file", dest='config_file', default='', nargs='?',
@@ -63,7 +63,7 @@ def argparse_function(ver: str) -> typing.Tuple[str, str, str, str, bool, bool, 
     parser.add_argument("-R", "--rerun-delay", dest='delaytm', default='', nargs='?',
                         help="Delay (eg. 1h10m30s or 60 (second)) time and rerun, until all movies proceed. Note: stop_counter value in config or -c must none zero.")
     parser.add_argument("-i", "--ignore-failed-list", action="store_true", help="Ignore failed list '{}'".format(
-        os.path.join(os.path.abspath(conf.failed_folder()), 'failed_list.txt')))
+        os.path.abspath(conf.failed_list_file())))
     parser.add_argument("-a", "--auto-exit", action="store_true",
                         help="Auto exit after program complete")
     parser.add_argument("-g", "--debug", action="store_true",
@@ -330,9 +330,9 @@ def movie_lists(source_folder, regexstr: str) -> typing.List[str]:
             cliRE = re.compile(regexstr, re.IGNORECASE)
         except:
             pass
-    failed_list_txt_path = Path(conf.failed_folder()).resolve() / 'failed_list.txt'
+    failed_list_txt_path = conf.failed_list_file()
     failed_set = set()
-    if (main_mode == 3 or link_mode) and not conf.ignore_failed_list():
+    if (main_mode in (3, 4) or link_mode) and not conf.ignore_failed_list():
         try:
             flist = failed_list_txt_path.read_text(encoding='utf-8').splitlines()
             failed_set = set(flist)
@@ -340,8 +340,26 @@ def movie_lists(source_folder, regexstr: str) -> typing.List[str]:
                 fset = failed_set.copy()
                 for i in range(len(flist) - 1, -1, -1):
                     fset.remove(flist[i]) if flist[i] in fset else flist.pop(i)
+                failed_list_txt_path.parent.mkdir(parents=True, exist_ok=True)
                 failed_list_txt_path.write_text('\n'.join(flist) + '\n', encoding='utf-8')
                 assert len(fset) == 0 and len(flist) == len(failed_set)
+        except:
+            pass
+    # 无法识别列表(番号识别失败 / not found)：与 failed_list 一样参与“已处理则跳过”，避免重复报错。
+    # 它在所有模式下都会产生，因此不受 (main_mode in (3,4) or link_mode) 限制；同样受 ignore_failed_list 控制。
+    unrecognized_list_txt_path = conf.unrecognized_list_file()
+    unrecognized_set = set()
+    if not conf.ignore_failed_list():
+        try:
+            ulist = unrecognized_list_txt_path.read_text(encoding='utf-8').splitlines()
+            unrecognized_set = set(ulist)
+            if len(ulist) != len(unrecognized_set):  # 去重写回，保持条目先后次序
+                uset = unrecognized_set.copy()
+                for i in range(len(ulist) - 1, -1, -1):
+                    uset.remove(ulist[i]) if ulist[i] in uset else ulist.pop(i)
+                unrecognized_list_txt_path.parent.mkdir(parents=True, exist_ok=True)
+                unrecognized_list_txt_path.write_text('\n'.join(ulist) + '\n', encoding='utf-8')
+                assert len(uset) == 0 and len(ulist) == len(unrecognized_set)
         except:
             pass
     if not Path(source_folder).is_dir():
@@ -349,10 +367,10 @@ def movie_lists(source_folder, regexstr: str) -> typing.List[str]:
         return []
     total = []
     source = Path(source_folder).resolve()
-    skip_failed_cnt, skip_nfo_days_cnt = 0, 0
+    skip_failed_cnt, skip_unrecognized_cnt, skip_nfo_days_cnt = 0, 0, 0
     escape_folder_set = set(re.split("[,，]", conf.escape_folder()))
     for full_name in source.glob(r'**/*'):
-        if main_mode != 3 and set(full_name.parent.parts) & escape_folder_set:
+        if main_mode not in (3, 4) and set(full_name.parent.parts) & escape_folder_set:
             continue
         if not full_name.is_file():
             continue
@@ -364,16 +382,24 @@ def movie_lists(source_folder, regexstr: str) -> typing.List[str]:
             if debug:
                 print('[!]Skip failed movie:', absf)
             continue
+        if absf in unrecognized_set:
+            skip_unrecognized_cnt += 1
+            if debug:
+                print('[!]Skip unrecognized movie:', absf)
+            continue
         is_sym = full_name.is_symlink()
-        if main_mode != 3 and (is_sym or (full_name.stat().st_nlink > 1 and not conf.scan_hardlink())):  # 短路布尔 符号链接不取stat()，因为符号链接可能指向不存在目标
-            continue  # 模式不等于3下跳过软连接和未配置硬链接刮削
+        if main_mode not in (3, 4) and (is_sym or (full_name.stat().st_nlink > 1 and not conf.scan_hardlink())):  # 短路布尔 符号链接不取stat()，因为符号链接可能指向不存在目标
+            continue  # 模式不等于3且不等于4下跳过软连接和未配置硬链接刮削
         # 调试用0字节样本允许通过，去除小于120MB的广告'苍老师强力推荐.mp4'(102.2MB)'黑道总裁.mp4'(98.4MB)'有趣的妹子激情表演.MP4'(95MB)'有趣的臺灣妹妹直播.mp4'(15.1MB)
         movie_size = 0 if is_sym else full_name.stat().st_size  # 同上 符号链接不取stat()及st_size，直接赋0跳过小视频检测
         # if 0 < movie_size < 125829120:  # 1024*1024*120=125829120
         #     continue
         if cliRE and not cliRE.search(absf) or trailerRE.search(full_name.name):
             continue
-        if main_mode == 3:
+        # nfo_skip_days 检查：模式3始终执行；模式4(只下载字幕)仅在开关
+        # skip_nfo_check_in_subtitle_mode=0 时执行，=1(默认)则跳过检查、处理所有视频。
+        do_nfo_skip_check = main_mode == 3 or (main_mode == 4 and not conf.skip_nfo_check_in_subtitle_mode())
+        if do_nfo_skip_check:
             nfo = full_name.with_suffix('.nfo')
             if not nfo.is_file():
                 if debug:
@@ -387,6 +413,8 @@ def movie_lists(source_folder, regexstr: str) -> typing.List[str]:
 
     if skip_failed_cnt:
         print(f"[!]Skip {skip_failed_cnt} movies in failed list '{failed_list_txt_path}'.")
+    if skip_unrecognized_cnt:
+        print(f"[!]Skip {skip_unrecognized_cnt} movies in unrecognized list '{unrecognized_list_txt_path}'.")
     if skip_nfo_days_cnt:
         print(
             f"[!]Skip {skip_nfo_days_cnt} movies in source folder '{source}' who's .nfo modified within {nfo_skip_days} days.")
@@ -455,7 +483,7 @@ def write_failed_list_separator():
     if not isinstance(sep, str) or not len(sep):
         return None
     try:
-        ftxt = Path(conf.failed_folder()).resolve() / 'failed_list.txt'
+        ftxt = conf.failed_list_file()
         if not ftxt.is_file():
             return None
         content = ftxt.read_text(encoding='utf-8')
@@ -475,6 +503,7 @@ def write_failed_list_separator():
             lines[-1] = sep_line  # 上批次无新失败，覆盖更新时间戳
         else:
             lines.append(sep_line)
+        ftxt.parent.mkdir(parents=True, exist_ok=True)
         ftxt.write_text('\n'.join(lines) + '\n', encoding='utf-8')
         return sep_line
     except Exception:
@@ -511,21 +540,25 @@ def create_data_and_move(movie_path: str, zero_op: bool, no_net_op: bool, oCC):
             else:
                 core_main(movie_path, n_number, oCC)
         else:
+            # 番号识别失败：未能进入正常刮削流程，记入无法识别列表(与刮削失败分开)
             print("[-] number empty ERROR")
-            moveFailedFolder(movie_path)
+            record_unrecognized(movie_path)
         print("[*]======================================================")
     else:
+        print(f"[!] [{n_number}] As Number Processing for '{movie_path}'")
+        if zero_op:
+            return
+        if not n_number:
+            # 番号识别失败：单独归入无法识别列表，不当作刮削失败
+            print("[-] number empty ERROR")
+            record_unrecognized(movie_path)
+            print("[*]======================================================")
+            return
         try:
-            print(f"[!] [{n_number}] As Number Processing for '{movie_path}'")
-            if zero_op:
-                return
-            if n_number:
-                if no_net_op:
-                    core_main_no_net_op(movie_path, n_number)
-                else:
-                    core_main(movie_path, n_number, oCC)
+            if no_net_op:
+                core_main_no_net_op(movie_path, n_number)
             else:
-                raise ValueError("number empty")
+                core_main(movie_path, n_number, oCC)
             print("[*]======================================================")
         except Exception as err:
             print(f"[-] [{movie_path}] ERROR:")
@@ -545,7 +578,9 @@ def create_data_and_move_with_custom_number(file_path: str, custom_number, oCC, 
         if custom_number:
             core_main(file_path, custom_number, oCC, specified_source, specified_url)
         else:
+            # 番号识别失败：未能进入正常刮削流程，与批量模式一致，归入无法识别列表
             print("[-] number empty ERROR")
+            record_unrecognized(os.path.abspath(file_path))
         print("[*]======================================================")
     except Exception as err:
         print("[-] [{}] ERROR:".format(file_path))
@@ -568,8 +603,8 @@ def main(args: tuple) -> Path:
     conf = config.getInstance()
     main_mode = conf.main_mode()
     folder_path = ""
-    if main_mode not in (1, 2, 3):
-        print(f"[-]Main mode must be 1 or 2 or 3! You can run '{os.path.basename(sys.argv[0])} --help' for more help.")
+    if main_mode not in (1, 2, 3, 4):
+        print(f"[-]Main mode must be 1, 2, 3 or 4! You can run '{os.path.basename(sys.argv[0])} --help' for more help.")
         os._exit(4)
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -601,7 +636,7 @@ def main(args: tuple) -> Path:
     if len(sys.argv) > 1:
         print('[!]CmdLine:', " ".join(sys.argv[1:]))
     print('[+]Main Working mode ## {}: {} ## {}{}{}'
-          .format(*(main_mode, ['Scraping', 'Organizing', 'Scraping in analysis folder'][main_mode - 1],
+          .format(*(main_mode, ['Scraping', 'Organizing', 'Scraping in analysis folder', 'Downloading subtitles only'][main_mode - 1],
                     "" if not conf.multi_threading() else ", multi_threading on",
                     "" if conf.nfo_skip_days() == 0 else f", nfo_skip_days={conf.nfo_skip_days()}",
                     "" if conf.stop_counter() == 0 else f", stop_counter={conf.stop_counter()}"
