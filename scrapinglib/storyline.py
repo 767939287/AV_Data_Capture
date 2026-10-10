@@ -105,9 +105,49 @@ def getStoryline(number, title=None, sites: list = None, uncensored=None, proxie
     sel = ''
 
     prefer_jp = config.getInstance().storyline_prefer_jp()
+    both_langs = config.getInstance().storyline_both_langs()
     # 以下debug结果输出会写入日志
     s = f'[!]Storyline{G_mode_txt[run_mode]}模式运行{len(sort_sites)}个任务共耗时(含启动开销){time.time() - start_time:.3f}秒，结束于{time.strftime("%H:%M:%S")}'
     sel_site = ''
+
+    if both_langs:
+        # both_langs=1：同时保留“最佳日文简介”和“最佳中文简介”，拼接成一个 outline。
+        # 选取规则（各自按 sort_sites 顺序取第一个有效结果）：
+        #   - 日文站点：如 fanza / mgstage
+        #   - 中文站点：非日文即视为中文（airav / airavwiki / avno1 / xcity / 58avgo 等）
+        # 拼接顺序固定为：日文在前、中文在后（用户要求）；缺失某种语言时只返回另一种。
+        jp_site, jp_desc = '', ''
+        cn_site, cn_desc = '', ''
+        for site, desc in zip(sort_sites, results):
+            if not (isinstance(desc, str) and len(desc)):
+                continue
+            if is_japanese(desc):
+                if not len(jp_site):
+                    jp_site, jp_desc = site, desc
+            else:
+                if not len(cn_site):
+                    cn_site, cn_desc = site, desc
+            if len(jp_site) and len(cn_site):
+                break
+        parts = [d for d in (jp_desc, cn_desc) if d]
+        if parts:
+            sep = config.getInstance().storyline_both_langs_sep()
+            sel = sep.join(parts)
+        # 记录选中的日/中站点，便于 debug 时核对
+        sel_site = jp_site or cn_site
+        for site, desc in zip(sort_sites, results):
+            sl = len(desc) if isinstance(desc, str) else 0
+            marks = []
+            if site == jp_site:
+                marks.append('日文选中')
+            if site == cn_site:
+                marks.append('中文选中')
+            mark = f"[{'/'.join(marks)}字数:{sl}]" if marks else (f'字数:{sl}' if sl else '空')
+            s += f'，{site}{mark}'
+        if debug:
+            print(s)
+        return sel
+
     # 严格按 sort_sites 的顺序（即 config 中 censored_site/uncensored_site 在前、site 在后的声明顺序）选择：
     #   prefer_jp=1: 取第一个有结果的站点（按顺序，即使为日文，如 fanza/mgstage）
     #   prefer_jp=0: 优先第一个有结果的中文站点；若全是日文，则取第一个有结果的日文站点兜底

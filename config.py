@@ -208,6 +208,45 @@ class Config:
         return self.conf.getint("common", "nfo_skip_days", fallback=30)
 
     def sort_order(self) -> str:
+    def storyline_prefer_jp(self) -> bool:
+        """是否优先使用靠前站点(如fanza)的日文剧情简介"""
+        try:
+            return self.conf.getboolean("storyline", "prefer_jp")
+        except:
+            return False
+
+    def storyline_both_langs(self) -> bool:
+        """是否同时保留中文与日文剧情简介（[storyline] both_langs）。
+
+        0（默认）：沿用原行为，只按 prefer_jp 规则选取**一个**站点的简介；
+        1         ：同时保留“最佳日文简介”和“最佳中文简介”，两者拼接成一个 outline
+                    （日文在前、中文在后；若某种语言缺失则只返回另一种）。
+        段/键缺失或非法时返回 False，保证默认行为与升级前完全一致。
+        """
+        try:
+            return self.conf.getboolean("storyline", "both_langs", fallback=False)
+        except Exception:
+            return False
+
+    def storyline_both_langs_sep(self) -> str:
+        """日文与中文剧情简介拼接时的分隔符（[storyline] both_langs_sep）。
+
+        默认使用换行符 '\\n'。仅当 both_langs=1 时生效。
+        支持在 ini 中原样书写转义序列（如 \\n 表示换行，\\t 表示制表符），程序会将其解释为真实字符。
+        """
+        try:
+            v = self.conf.get("storyline", "both_langs_sep", fallback="\\n")
+        except Exception:
+            v = "\\n"
+        if not isinstance(v, str):
+            v = "\\n"
+        # 支持用户在 ini 中书写 \n / \t 等转义序列；非法转义时原样返回
+        try:
+            return v.encode('utf-8').decode('unicode_escape')
+        except Exception:
+            return v
+
+    def cc_convert_mode(self) -> int:
         """刮削顺序([common] sort_order)。
 
         控制扫描到的视频文件的处理先后顺序：
@@ -818,6 +857,8 @@ class Config:
         conf.set(sec15, "censored_site", "fanza,airav,xcity")
         conf.set(sec15, "uncensored_site", "58avgo")
         conf.set(sec15, "prefer_jp", "1")
+        conf.set(sec15, "both_langs", "0")
+        conf.set(sec15, "both_langs_sep", "\\n")
         conf.set(sec15, "show_result", "0")
         conf.set(sec15, "run_mode", "1")
         conf.set(sec15, "cc_convert", "1")
