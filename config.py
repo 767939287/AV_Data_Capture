@@ -207,6 +207,30 @@ class Config:
     def nfo_skip_days(self) -> int:
         return self.conf.getint("common", "nfo_skip_days", fallback=30)
 
+    def sort_order(self) -> str:
+        """刮削顺序([common] sort_order)。
+
+        控制扫描到的视频文件的处理先后顺序：
+          - none(默认)  : 不排序，保持 Path.glob('**/*') 的原生遍历顺序(与升级前行为一致)；
+          - name        : 按文件名(不含路径)自然排序(数字按数值大小，如 2<10)；
+          - name_desc   : 按文件名自然排序的倒序；
+          - mtime       : 按文件修改时间(旧→新)；
+          - mtime_desc  : 按文件修改时间(新→旧)；
+          - size        : 按文件大小(小→大)；
+          - size_desc   : 按文件大小(大→小)；
+          - path        : 按完整路径字符串排序；
+          - path_desc   : 按完整路径字符串倒序。
+        缺失或非法值一律按 none 处理，保证默认行为不变。
+        """
+        try:
+            v = self.conf.get("common", "sort_order", fallback="none")
+        except Exception:
+            return "none"
+        v = (v or "").strip().lower()
+        valid = ("none", "name", "name_desc", "mtime", "mtime_desc",
+                 "size", "size_desc", "path", "path_desc")
+        return v if v in valid else "none"
+
     def skip_nfo_check_in_subtitle_mode(self) -> bool:
         """只下载字幕模式(main_mode=4)是否跳过 nfo_skip_days 检查。
 

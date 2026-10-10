@@ -411,6 +411,38 @@ def movie_lists(source_folder, regexstr: str) -> typing.List[str]:
                 continue
         total.append(absf)
 
+    # 按 [common] sort_order 对扫描结果排序（none 时保持原生遍历顺序，行为与升级前一致）。
+    # 放在这里(收集完全部文件、做各种过滤之后)排序，能保证后续所有分支(含软链接按成功目录
+    # 过滤)都以同一顺序处理；排序失败不影响正常流程。
+    def _sort_key_natural(p):
+        # 自然排序：把文件名中的数字片段按数值比较，避免 '10' 排在 '2' 前面。
+        # 只把纯 ASCII 数字当作数值(isdigit() 对全角/带圈等 Unicode 数字也返回 True，
+        # 但 int() 会抛 ValueError)，其余一律按小写字符串处理，保证 key 同位置类型一致。
+        return [int(t) if (t.isascii() and t.isdigit()) else t.lower()
+                for t in re.split(r'(\d+)', os.path.basename(p))]
+
+    sort_order = conf.sort_order()
+    if sort_order != "none":
+        try:
+            if sort_order == "name":
+                total.sort(key=_sort_key_natural)
+            elif sort_order == "name_desc":
+                total.sort(key=_sort_key_natural, reverse=True)
+            elif sort_order == "mtime":
+                total.sort(key=lambda p: os.lstat(p).st_mtime)
+            elif sort_order == "mtime_desc":
+                total.sort(key=lambda p: os.lstat(p).st_mtime, reverse=True)
+            elif sort_order == "size":
+                total.sort(key=lambda p: os.lstat(p).st_size)
+            elif sort_order == "size_desc":
+                total.sort(key=lambda p: os.lstat(p).st_size, reverse=True)
+            elif sort_order == "path":
+                total.sort()
+            elif sort_order == "path_desc":
+                total.sort(reverse=True)
+        except Exception as e:
+            print(f"[!]Sort movies by '{sort_order}' failed, keep original order: {e}")
+
     if skip_failed_cnt:
         print(f"[!]Skip {skip_failed_cnt} movies in failed list '{failed_list_txt_path}'.")
     if skip_unrecognized_cnt:
