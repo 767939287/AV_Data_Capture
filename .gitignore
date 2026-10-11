@@ -112,3 +112,5 @@ failed/*
 .vscode/launch.json
 
 .idea
+/.vs
+/.gitignore

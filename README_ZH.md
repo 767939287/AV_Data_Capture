@@ -17,6 +17,21 @@
 * [官方教程WIKI](https://github.com/yoshiko2/Movie_Data_Capture/wiki)
 * [VergilGao's Docker部署](https://github.com/VergilGao/docker-mdc)
 
+# Cloudflare 绕过（可选）
+部分站点（如 JavDB、JavLibrary）受 Cloudflare 防护，直连会被拦截。可自建 [TRAWL](https://github.com/germondai/trawl) 或 [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) 外部服务，并在 `config.ini` 的 `[cloudflare]` 段开启：
+
+```ini
+[cloudflare]
+switch = 1
+service = flaresolverr   ; 或 trawl
+host = http://127.0.0.1:8191
+sites = javdb.com,javdbapi.com,javlibrary.com,jav321.com
+```
+
+* 默认 `switch = 0`（关闭），保持原有直连行为不变。
+* 仅对 `sites` 白名单内的域名生效，其余站点仍走直连。
+* `service` 支持 `flaresolverr` 与 `trawl` 两种外部服务（TRAWL 亦兼容 FlareSolverr 协议）。
+
 # 申明
 当你查阅、下载了本项目源代码或二进制程序，即代表你接受了以下条款
 * 本项目和项目成果仅供技术，学术交流和Python3性能测试使用

@@ -6,6 +6,7 @@ import configparser
 import time
 import typing
 from pathlib import Path
+from urllib.parse import urlsplit
 
 G_conf_override = {
     # index 0 save Config() first instance for quick access by using getInstance()
@@ -527,6 +528,62 @@ class Config:
         except Exception:
             return False
 
+    def cloudflare(self) -> "CloudflareConf":
+        """ 读取 [cloudflare] 段配置（外部 Cloudflare 挑战绕过服务）
+
+        :return: CloudflareConf 实例；缺失段/键或取值异常时回退到「已禁用」默认配置。
+
+        采用 fallback 防御式读取，保证旧 config.ini 无 [cloudflare] 段时零副作用：
+        switch=0 时 enable 为 False，程序行为与改动前完全一致。
+        """
+        try:
+            sec = "cloudflare"
+            switch = self.conf.getboolean(sec, "switch", fallback=False)
+            service = self.conf.get(sec, "service", fallback="flaresolverr")
+            host = self.conf.get(sec, "host", fallback=CloudflareConf.DEFAULT_HOST)
+            timeout = self.conf.getint(sec, "timeout", fallback=CloudflareConf.DEFAULT_TIMEOUT)
+            sites = self._parse_host_list(self.conf.get(sec, "sites", fallback=""))
+            trusted = self._parse_host_list(self.conf.get(sec, "cf_trusted_hosts", fallback=""))
+            return CloudflareConf(switch, service, host, timeout, sites, trusted)
+        except Exception:
+            # 任何读取异常都不应影响主流程，直接返回「已禁用」默认值
+            return CloudflareConf(False, "flaresolverr", CloudflareConf.DEFAULT_HOST,
+                                  CloudflareConf.DEFAULT_TIMEOUT, [], [])
+
+    def javdb_channel(self) -> "JavdbChannelConf":
+        """ 读取 [javdb_channel] 段（JavDB 三通道选择）
+
+        :return: JavdbChannelConf 实例；段/键缺失或取值异常时回退 service='web' 默认配置
+
+        采用 fallback 防御式读取，保证旧 config.ini 无 [javdb_channel] 段时零副作用：
+        service='web' 时程序行为与升级前逐行等价。
+        """
+        def _split(raw):
+            # 逗号分隔列表解析：保持原样（镜像地址不做小写化），并丢弃空白项
+            return [x.strip() for x in str(raw or "").split(",") if x.strip()]
+        try:
+            sec = "javdb_channel"
+            service = self.conf.get(sec, "service", fallback=JavdbChannelConf.DEFAULT_SERVICE)
+            order = _split(self.conf.get(sec, "fallback_order", fallback=""))
+            decrypt = self.conf.get(sec, "decrypt_app_image", fallback="1")
+            mirrors = _split(self.conf.get(sec, "api_mirrors", fallback=""))
+            cookie = self.conf.get(sec, "cookie", fallback="")
+            return JavdbChannelConf(service, order, decrypt, mirrors, cookie)
+        except Exception:
+            # 任何读取异常都不应影响主流程，回退到与升级前一致的 web 通道
+            return JavdbChannelConf(JavdbChannelConf.DEFAULT_SERVICE, [], "1", [], "")
+
+    @staticmethod
+    def _parse_host_list(raw: str) -> list:
+        """ 把逗号分隔的域名串解析为去空白的小写列表
+
+        :param raw: 原始字符串（如 javdb.com, javdbapi.com）
+        :return: 清理后的域名列表（自动忽略空白项）
+        """
+        if not raw:
+            return []
+        return [item.strip().lower() for item in str(raw).split(",") if item.strip()]
+
     def dmm_api_switch(self) -> bool:
         """DMM 官方 Affiliate API 开关。
 
@@ -918,6 +975,123 @@ class IniProxy():
             proxies = {}
 
         return proxies
+
+
+class CloudflareConf():
+    """ [cloudflare] 段配置聚合对象
+
+    封装外部 Cloudflare 挑战绕过服务（TRAWL / FlareSolverr）的开关、服务类型、
+    服务地址、超时与站点白名单，并提供白名单命中判断。
+    字段缺失或取值异常时一律回退到「关闭」的安全默认值，保证零副作用。
+    """
+
+    DEFAULT_HOST = "http://127.0.0.1:8191"
+    DEFAULT_TIMEOUT = 60
+
+    def __init__(self, switch, service: str, host: str, timeout: int,
+                 sites: list, trusted_hosts: list):
+        """ 保存原始配置值
+
+        :param switch: 原始开关值（'0'/'1'/0/1 等）
+        :param service: 服务类型原始字符串
+        :param host: 服务地址原始字符串
+        :param timeout: 超时秒数
+        :param sites: 生效站点 host 列表（已小写、去空白）
+        :param trusted_hosts: 落地域名校验列表
+        """
+        # switch 兼容 bool（getboolean）与 '0'/'1' 字符串两种来源
+        self.enable = switch == '1' or switch == 1
+        # service 归一化：仅识别 trawl，其余（含空值）一律按 flaresolverr 处理
+        service_lo = (service or "").strip().lower()
+        self.service = "trawl" if service_lo == "trawl" else "flaresolverr"
+        # host 归一化：去尾部斜杠；缺少协议时强制补 http://（回环地址用 https 会 TLS 握手失败）
+        host_str = (host or "").strip().rstrip("/")
+        if host_str and "://" not in host_str:
+            host_str = "http://" + host_str
+        self.host = host_str or self.DEFAULT_HOST
+        try:
+            self.timeout = int(timeout)
+        except (TypeError, ValueError):
+            self.timeout = self.DEFAULT_TIMEOUT
+        if self.timeout <= 0:
+            self.timeout = self.DEFAULT_TIMEOUT
+        self.sites = list(sites or [])
+        self.trusted_hosts = list(trusted_hosts or [])
+
+    def is_whitelisted(self, url: str) -> bool:
+        """ 判断 URL 的 host 是否命中生效站点白名单
+
+        :param url: 待判断的请求 URL
+        :return: 命中白名单返回 True，否则 False
+
+        匹配规则：取 URL 的小写 hostname，与白名单项做「精确相等」或
+        「后缀匹配(.域名)」判断，使白名单填 javdb.com 时也能命中 www.javdb.com。
+        """
+        if not url or not self.sites:
+            return False
+        try:
+            hostname = (urlsplit(str(url)).hostname or "").lower()
+        except Exception:
+            return False
+        if not hostname:
+            return False
+        for site in self.sites:
+            # 白名单项允许带端口，比较时只取主机名部分
+            site_host = site.split(":")[0].strip().lower()
+            if not site_host:
+                continue
+            if hostname == site_host or hostname.endswith("." + site_host):
+                return True
+        return False
+
+
+class JavdbChannelConf():
+    """ [javdb_channel] 段配置聚合对象
+
+    决定 JavDB 刮削器使用哪条数据通道（web/api/app/auto）以及 auto 模式下的降级顺序。
+    段/键缺失时回退到 service='web'，保证默认行为与升级前完全一致。
+    """
+
+    SUPPORT_SERVICE = ("web", "api", "app", "auto")
+    DEFAULT_SERVICE = "web"
+    DEFAULT_ORDER = ("app", "api", "web")
+    DEFAULT_MIRRORS = (
+        "https://javdb573.com",
+        "https://javdb574.com",
+        "https://javdb575.com",
+    )
+
+    def __init__(self, service: str, fallback_order: list, decrypt_app_image, mirrors: list, cookie: str):
+        """ 保存并归一化配置值
+
+        :param service: 通道名原始字符串（web/api/app/auto），非法值回退 web
+        :param fallback_order: auto 模式的尝试顺序列表
+        :param decrypt_app_image: 是否解密 App CDN 图片（兼容 '0'/'1'/bool）
+        :param mirrors: api 通道镜像站列表（为空时使用内置默认）
+        :param cookie: 附加 Cookie 字符串（可为空）
+        """
+        service_lo = (service or "").strip().lower()
+        self.service = service_lo if service_lo in self.SUPPORT_SERVICE else self.DEFAULT_SERVICE
+        # fallback_order 过滤非法通道并保序去重；结果为空时用默认顺序
+        order = []
+        for item in (fallback_order or []):
+            name = str(item).strip().lower()
+            if name in ("web", "api", "app") and name not in order:
+                order.append(name)
+        self.fallback_order = order or list(self.DEFAULT_ORDER)
+        # decrypt_app_image 兼容 '0'/'1'/0/1/False/True 等多种来源
+        self.decrypt_app_image = not (decrypt_app_image in ('0', 0, False, 'false', 'False'))
+        self.mirrors = [m.rstrip('/') for m in (mirrors or []) if str(m).strip()] or list(self.DEFAULT_MIRRORS)
+        self.cookie = (cookie or "").strip()
+
+    def channel_list(self) -> list:
+        """ 返回需要依次尝试的通道名列表
+
+        :return: service 非 auto 时仅返回该通道；auto 时返回 fallback_order 副本
+        """
+        if self.service == "auto":
+            return list(self.fallback_order)
+        return [self.service]
 
 
 if __name__ == "__main__":
