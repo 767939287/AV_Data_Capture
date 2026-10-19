@@ -15,6 +15,11 @@
 - 新增映射表文件校验 `_mapping_file_ok()`：
   - XML（`mapping_actor.xml` / `mapping_info.xml`）必须可解析且根节点为 `actor` / `info`；
   - `c_number.json` 必须可解析为 JSON 对象。
+- 新增 `[common] nfo_plot_style`：`.nfo` 的 `<plot>` / `<outline>` 支持两种写法切换：
+  - `cdata`：`<plot><![CDATA[...]]></plot>`（旧写法）；
+  - `plain`：`<plot>...</plot>`，直接把换行写入文本节点（与 `1111.nfo` 一致，
+    已在 Jellyfin 12.0 验证，默认配置使用该值）。
+  - 未配置该项时仍按 `cdata` 处理，保持旧行为。
 
 ### 变更
 

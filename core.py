@@ -404,6 +404,10 @@ def print_files(path, leak_word, c_word, naming_rule, part, cn_sub, json_data, f
             outline = f"{outline}"
         else:
             outline = f"{number}#{outline}"
+        # plot/outline 写法由 [common] nfo_plot_style 控制：
+        #   cdata = <plot><![CDATA[...]]></plot>（默认，兼容旧行为）
+        #   plain = <plot>...</plot>（直接把换行写入节点，参考 1111.nfo 的写法）
+        plot_style = config.getInstance().nfo_plot_style()
         with open(nfo_path, "wt", encoding='UTF-8') as code:
             print('<?xml version="1.0" encoding="UTF-8" ?>', file=code)
             print("<movie>", file=code)
@@ -425,8 +429,18 @@ def print_files(path, leak_word, c_word, naming_rule, part, cn_sub, json_data, f
             print("  <studio>" + studio + "</studio>", file=code)
             print("  <year>" + year + "</year>", file=code)
             if not config.getInstance().jellyfin():
-                print("  <outline><![CDATA[" + outline + "]]></outline>", file=code)
-                print("  <plot><![CDATA[" + outline + "]]></plot>", file=code)
+                if plot_style == 'plain':
+                    # 纯文本节点：参考 1111.nfo，直接写入文本（换行保留）。
+                    # 元数据中的 & < > 已被 special_characters_replacement 替换，
+                    # 这里再做一次 XML 转义兜底，避免手改数据破坏 XML。
+                    plot_text = (outline.replace("&", "&amp;")
+                                 .replace("<", "&lt;")
+                                 .replace(">", "&gt;"))
+                    print("  <outline>" + plot_text + "</outline>", file=code)
+                    print("  <plot>" + plot_text + "</plot>", file=code)
+                else:
+                    print("  <outline><![CDATA[" + outline + "]]></outline>", file=code)
+                    print("  <plot><![CDATA[" + outline + "]]></plot>", file=code)
             else:
                 print("  <outline>" + outline + "</outline>", file=code)
                 print("  <plot>" + outline + "</plot>", file=code)

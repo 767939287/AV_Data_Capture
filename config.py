@@ -389,6 +389,20 @@ class Config:
     def jellyfin(self) -> int:
         return self.conf.getint("common", "jellyfin")
 
+    def nfo_plot_style(self) -> str:
+        """.nfo 中 <plot>/<outline> 的写法（[common] nfo_plot_style）。
+
+        cdata（默认）：<plot><![CDATA[...]]></plot>，与升级前一致；
+        plain        ：<plot>...</plot>，直接把文本（含换行）写入节点，
+                       与 1111.nfo 的写法一致。
+        非法值/缺失时按 cdata 处理。
+        """
+        try:
+            v = (self.conf.get("common", "nfo_plot_style", fallback="cdata") or "").strip().lower()
+        except Exception:
+            v = "cdata"
+        return "plain" if v in ("plain", "text", "raw", "1") else "cdata"
+
     def actor_only_tag(self) -> bool:
         return self.conf.getboolean("common", "actor_only_tag")
 
@@ -944,6 +958,7 @@ class Config:
         conf.set(sec1, "unrecognized_list_path", "")
         conf.set(sec1, "download_only_missing_images", "1")
         conf.set(sec1, "jellyfin", "0")
+        conf.set(sec1, "nfo_plot_style", "cdata")
         conf.set(sec1, "actor_only_tag", "0")
         conf.set(sec1, "sleep", "3")
         conf.set(sec1, "anonymous_fill", "0")
