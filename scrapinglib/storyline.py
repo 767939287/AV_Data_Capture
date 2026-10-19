@@ -24,6 +24,13 @@ from . import httprequest
 # 舍弃 Amazon 源
 G_registered_storyline_site = {"airavwiki", "airav", "avno1", "xcity", "58avgo", "fanza", "mgstage"}
 
+# both_langs=1 时用于区分「日文简介」与「中文简介」的站点分类。
+# 以站点归类而不是靠内容检测：中文简介里常出现日文假名(人名/作品名/语气词)，
+# 用 is_japanese(desc) 判断会把中文简介误判成日文，导致中文简介被丢弃、
+# 日文与中文之间根本不会插入分隔符。
+G_jp_storyline_sites = {"fanza", "mgstage"}
+G_cn_storyline_sites = {"airavwiki", "airav", "avno1", "xcity", "58avgo"}
+
 G_mode_txt = ('顺序执行', '线程池')
 
 
@@ -113,15 +120,23 @@ def getStoryline(number, title=None, sites: list = None, uncensored=None, proxie
     if both_langs:
         # both_langs=1：同时保留“最佳日文简介”和“最佳中文简介”，拼接成一个 outline。
         # 选取规则（各自按 sort_sites 顺序取第一个有效结果）：
-        #   - 日文站点：如 fanza / mgstage
-        #   - 中文站点：非日文即视为中文（airav / airavwiki / avno1 / xcity / 58avgo 等）
+        #   - 日文站点：fanza / mgstage
+        #   - 中文站点：airav / airavwiki / avno1 / xcity / 58avgo
+        # 语言归类优先按“站点”判断(见 G_jp_storyline_sites / G_cn_storyline_sites)，
+        # 只有未知站点才退回内容检测 is_japanese()，避免中文简介含假名被误判而丢失。
         # 拼接顺序固定为：日文在前、中文在后（用户要求）；缺失某种语言时只返回另一种。
         jp_site, jp_desc = '', ''
         cn_site, cn_desc = '', ''
         for site, desc in zip(sort_sites, results):
             if not (isinstance(desc, str) and len(desc)):
                 continue
-            if is_japanese(desc):
+            if site in G_jp_storyline_sites:
+                is_jp = True
+            elif site in G_cn_storyline_sites:
+                is_jp = False
+            else:
+                is_jp = is_japanese(desc)
+            if is_jp:
                 if not len(jp_site):
                     jp_site, jp_desc = site, desc
             else:
@@ -133,6 +148,8 @@ def getStoryline(number, title=None, sites: list = None, uncensored=None, proxie
         if parts:
             sep = config.getInstance().storyline_both_langs_sep()
             sel = sep.join(parts)
+            if debug:
+                print(f'[!]Storyline both_langs: jp={jp_site or "-"}, cn={cn_site or "-"}, sep={sep!r}')
         # 记录选中的日/中站点，便于 debug 时核对
         sel_site = jp_site or cn_site
         for site, desc in zip(sort_sites, results):

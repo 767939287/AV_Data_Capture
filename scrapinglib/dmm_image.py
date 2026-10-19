@@ -147,38 +147,40 @@ def _parse_image_size(data: bytes):
     return 0, 0
 
 
-def _valid_image(url: str, proxies=None, verify=None, check_hd: bool = False) -> bool:
-    """校验图片是否存在且有效。
+def _probe_image(url: str, proxies=None, verify=None, check_hd: bool = False) -> str:
+    """校验图片是否存在且有效，返回空串表示有效，否则返回简短的失败原因。
 
     DMM 对不存在的图通常返回 404；此处同时过滤 Content-Type 非图片、
-    以及体积极小的占位图（<4KB）。
-
-    check_hd=True 时额外读取图片分辨率，宽 < 700 视为缩略图/占位图拒收
-    （参考 MDCx：awsimgsrc 同一 URL 可能返回 147x200 缩略图，需按尺寸过滤）。
+    以及体积极小的占位图（<4KB）；check_hd=True 时还要求宽度 >= 700。
     """
     try:
         resp = httprequest.get(url, return_type="object", retry=1, timeout=8,
                                proxies=proxies, verify=verify)
         if resp is None:
-            return False
+            return "无响应"
         if resp.status_code >= 400:
-            return False
+            return f"HTTP {resp.status_code}"
         content_type = resp.headers.get("Content-Type", "")
         if content_type and not content_type.startswith("image/"):
-            return False
+            return f"非图片(Content-Type={content_type})"
         length = resp.headers.get("Content-Length")
         if length is not None and str(length).isdigit() and int(length) < 4096:
-            return False
+            return f"文件过小({length}B)"
         if check_hd:
             # 读取前若干字节解析分辨率（JPEG 的 SOF 段通常在前几 KB 内）
             data = httprequest.get(url, return_type="content", retry=1, timeout=8,
                                    proxies=proxies, verify=verify)
             width, _height = _parse_image_size(data or b"")
             if width and width < _DMM_HD_MIN_WIDTH:
-                return False
-        return True
-    except Exception:
-        return False
+                return f"分辨率不足(宽{width}<{_DMM_HD_MIN_WIDTH})"
+        return ""
+    except Exception as e:
+        return f"请求异常({type(e).__name__})"
+
+
+def _valid_image(url: str, proxies=None, verify=None, check_hd: bool = False) -> bool:
+    """向后兼容的布尔校验：图片有效返回 True。"""
+    return _probe_image(url, proxies=proxies, verify=verify, check_hd=check_hd) == ""
 
 
 def _dedupe(urls):
@@ -304,14 +306,15 @@ def _cid_candidates_from_number(number: str):
     return result
 
 
-def get_dmm_cid(number: str, proxies=None, verify=None) -> str:
-    """通过 DMM 搜索页解析出该番号对应的站内 cid。
+def get_dmm_cid_ex(number: str, proxies=None, verify=None):
+    """通过 DMM 搜索页解析出该番号对应的站内 cid，并返回 (cid, reason)。
 
-    优先解析搜索结果里分值最高的详情页链接；解析不到则返回空串。
+    cid 非空表示成功（reason 为空串）；cid 为空时 reason 给出具体失败原因。
+    优先解析搜索结果里分值最高的详情页链接。
     """
     normalized = _normalize_number(number)
     if not normalized:
-        return ""
+        return "", "番号为空或无法规整"
     # DMM 搜索对 00 补零/无补零两种形态都有结果，这里两种都试
     search_numbers = [normalized]
     if re.match(r"^[a-z]+\d+$", normalized):
@@ -322,14 +325,17 @@ def get_dmm_cid(number: str, proxies=None, verify=None) -> str:
         search_numbers.append(f"{prefix}-{digits}")
     search_numbers = _dedupe(search_numbers)
 
+    problems = []
     for s_num in search_numbers:
         url = "https://www.dmm.co.jp/search/=/searchstr=" + quote(s_num) + "/"
         try:
             html = httprequest.get(url, retry=1, timeout=12,
                                    proxies=proxies, verify=verify)
-        except Exception:
+        except Exception as e:
+            problems.append(f"搜索请求异常({type(e).__name__})")
             continue
         if not html or html == 404:
+            problems.append("搜索页无响应/404")
             continue
         # 从 HTML 中直接提取详情页 cid（比 xpath 更稳，覆盖脚本内嵌链接）
         cids = _DETAIL_HREF_RE.findall(html)
@@ -338,14 +344,26 @@ def get_dmm_cid(number: str, proxies=None, verify=None) -> str:
             cids = _CID_RE.findall(html)
         cids = _dedupe([c for c in cids if c])
         if not cids:
+            problems.append("搜索页未解析到 cid")
             continue
         # 选与番号数字部分最匹配的 cid（例如 ssis-200 优先匹配 ssis00200）
         normalized_digits = re.sub(r"\D", "", normalized)
         for cid in cids:
             if normalized_digits and normalized_digits.lstrip("0") in cid.lstrip("0"):
-                return cid
-        return cids[0]
-    return ""
+                return cid, ""
+        return cids[0], ""
+    # 去重后拼接原因（避免多个搜索形态产生重复文本）
+    problems = _dedupe(problems)
+    return "", "；".join(problems) if problems else "DMM 搜索无结果"
+
+
+def get_dmm_cid(number: str, proxies=None, verify=None) -> str:
+    """通过 DMM 搜索页解析出该番号对应的站内 cid（兼容旧接口）。
+
+    解析不到时返回空串；需要失败原因请用 get_dmm_cid_ex()。
+    """
+    cid, _reason = get_dmm_cid_ex(number, proxies=proxies, verify=verify)
+    return cid
 
 
 def build_aws_cover_url(cid: str) -> str:
@@ -355,24 +373,46 @@ def build_aws_cover_url(cid: str) -> str:
     return _AWS_COVER_TMPL.format(cid=cid, suffix="ps")
 
 
-def cross_source_cover(number: str, proxies=None, verify=None) -> str:
-    """跨源高清封面：按番号从 DMM 取高清封面直链，取不到返回空串。
+def cross_source_cover_ex(number: str, proxies=None, verify=None):
+    """跨源高清封面：按番号从 DMM 取高清封面直链，返回 (url, reason)。
 
-    仅返回通过 HEAD 校验的地址；任何失败都返回空串，由调用方保留原源封面。
+    url 非空表示成功（reason 为空串）；url 为空时 reason 给出具体失败原因
+    （番号为空 / DMM 搜索失败 / 每个候选图的 HTTP 状态、类型、体积、分辨率等）。
+    仅返回通过校验的地址；任何失败都返回空串，由调用方保留原源封面。
     """
     if not number:
-        return ""
+        return "", "番号为空"
+    reasons = []
     # 1) 直接由番号推导 cid 候选（快，命中常见系列）
     for cid in _cid_candidates_from_number(number):
         for suffix in ("pl", "ps"):  # 横版优先
             candidate = _AWS_COVER_TMPL.format(cid=cid, suffix=suffix)
-            if _valid_image(candidate, proxies=proxies, verify=verify, check_hd=True):
-                return candidate
+            why = _probe_image(candidate, proxies=proxies, verify=verify, check_hd=True)
+            if not why:
+                return candidate, ""
+            reasons.append(f"{cid}{suffix}.jpg: {why}")
     # 2) 走 DMM 搜索页拿到真实 cid（覆盖特殊前缀/组合系列）
-    cid = get_dmm_cid(number, proxies=proxies, verify=verify)
-    if cid:
+    cid, search_reason = get_dmm_cid_ex(number, proxies=proxies, verify=verify)
+    if not cid:
+        reasons.append(f"DMM 搜索失败: {search_reason}")
+    else:
         for suffix in ("pl", "ps"):
             candidate = _AWS_COVER_TMPL.format(cid=cid, suffix=suffix)
-            if _valid_image(candidate, proxies=proxies, verify=verify, check_hd=True):
-                return candidate
-    return ""
+            why = _probe_image(candidate, proxies=proxies, verify=verify, check_hd=True)
+            if not why:
+                return candidate, ""
+            reasons.append(f"{cid}{suffix}.jpg: {why}")
+    # 去重并限制长度，避免日志过长
+    reasons = _dedupe(reasons)
+    if len(reasons) > 6:
+        reasons = reasons[:6] + [f"...共 {len(reasons)} 个候选失败"]
+    return "", "；".join(reasons) if reasons else "未找到可用的 DMM 高清图"
+
+
+def cross_source_cover(number: str, proxies=None, verify=None) -> str:
+    """跨源高清封面：按番号从 DMM 取高清封面直链，取不到返回空串（兼容旧接口）。
+
+    需要失败原因请用 cross_source_cover_ex()。
+    """
+    url, _reason = cross_source_cover_ex(number, proxies=proxies, verify=verify)
+    return url

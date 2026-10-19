@@ -494,19 +494,42 @@ def create_failed_folder(failed_folder: str):
 
 
 def _is_separator_line(line: str) -> bool:
-    """判断某一行是否为 failed_list.txt 的任务分隔行（以 === 开头即视为分隔行）。"""
+    """判断某一行是否为列表文件的任务分隔行（以 === 开头即视为分隔行）。"""
     return isinstance(line, str) and line.lstrip().startswith("===")
 
 
-def write_failed_list_separator():
-    """在 failed_list.txt 末尾写入一条带时间的分隔行，标记本次刮削任务开始。
+def _mapping_file_ok(path: Path) -> bool:
+    """校验映射表文件是否可用（存在、非空、结构正确）。
 
-    仅用于分格/分批任务识别批次，规则：
-      - 分隔内容由 [common] failed_list_separator 决定（默认 "===="），留空则关闭；
+    - mapping_actor.xml / mapping_info.xml：必须是可解析的 XML，且根节点为 actor/info；
+    - c_number.json：必须是可解析的 JSON 对象。
+    只做轻量结构校验，不检查具体条目内容。
+    """
+    try:
+        p = Path(path)
+        if not p.is_file() or p.stat().st_size == 0:
+            return False
+        suffix = p.suffix.lower()
+        if suffix == ".xml":
+            root = etree.parse(str(p)).getroot()
+            return root.tag in ("actor", "info")
+        if suffix == ".json":
+            return isinstance(json.loads(p.read_text(encoding="utf-8")), dict)
+        return True
+    except Exception:
+        return False
+
+
+def _write_list_separator(list_path) -> typing.Optional[str]:
+    """在指定列表文件末尾写入一条带时间的分隔行，标记本次刮削任务开始。
+
+    失败列表(failed_list.txt) 与 无法识别列表(unrecognized_list.txt) 共用此逻辑，规则：
+      - 开关由 [common] failed_list_separator 决定（默认 "===="），留空则关闭；
       - 文件不存在或为空时不写（避免文件开头出现孤立分隔行）；
       - 若文件最后一行已是分隔行，则把该行更新时间戳（而不是再追加，避免空批次）；
       - 否则在末尾追加一行。
     本函数绝不删除任何已有内容；任何异常都被吞掉，不影响正常刮削。
+    返回写入的分隔行文本；未写入时返回 None。
     """
     conf = config.getInstance()
     sep = conf.failed_list_separator()
@@ -515,7 +538,7 @@ def write_failed_list_separator():
     if not isinstance(sep, str) or not len(sep):
         return None
     try:
-        ftxt = conf.failed_list_file()
+        ftxt = Path(list_path)
         if not ftxt.is_file():
             return None
         content = ftxt.read_text(encoding='utf-8')
@@ -540,6 +563,20 @@ def write_failed_list_separator():
         return sep_line
     except Exception:
         return None
+
+
+def write_failed_list_separator():
+    """在 failed_list.txt 末尾写入本次任务的分隔行（规则见 _write_list_separator）。"""
+    return _write_list_separator(config.getInstance().failed_list_file())
+
+
+def write_unrecognized_list_separator():
+    """在 unrecognized_list.txt 末尾写入本次任务的分隔行（规则见 _write_list_separator）。
+
+    与 failed_list.txt 使用同一个开关 [common] failed_list_separator，便于把
+    「每次运行无法识别的文件」按批次分隔，规则/宽度完全一致。
+    """
+    return _write_list_separator(config.getInstance().unrecognized_list_file())
 
 
 def rm_empty_folder(path):
@@ -675,44 +712,86 @@ def main(args: tuple) -> Path:
                     ) if not single_file_path else ('-', 'Single File', '', '', ''))
           )
 
+    # 自动更新检测与映射表更新已解耦，互不影响：
+    #   [update] update_check     → 仅检查程序版本（api.github.com）
+    #   [mapping_table] update    → 仅下载/更新映射表（[mapping_table] url）
+    # [mapping_table] update 缺失时依次回退旧位置，兼容旧配置。
     if conf.update_check():
         try:
             check_update(version)
-            # Download Mapping Table, parallel version
-            def fmd(f) -> typing.Tuple[str, Path]:
-                return ('https://raw.githubusercontent.com/yoshiko2/Movie_Data_Capture/master/MappingTable/' + f,
-                        Path.home() / '.local' / 'share' / 'mdc' / f)
-
-            map_tab = (fmd('mapping_actor.xml'), fmd('mapping_info.xml'), fmd('c_number.json'))
-            for k, v in map_tab:
-                if v.exists():
-                    if file_modification_days(str(v)) >= conf.mapping_table_validity():
-                        print("[+]Mapping Table Out of date! Remove", str(v))
-                        os.remove(str(v))
-            res = parallel_download_files(((k, v) for k, v in map_tab if not v.exists()))
-            for i, fp in enumerate(res, start=1):
-                if fp and len(fp):
-                    print(f"[+] [{i}/{len(res)}] Mapping Table Downloaded to {fp}")
-                else:
-                    print(f"[-] [{i}/{len(res)}] Mapping Table Download failed")
-        except:
+        except Exception:
             print("[!]" + " WARNING ".center(54, "="))
             print('[!]' + '-- GITHUB CONNECTION FAILED --'.center(54))
             print('[!]' + 'Failed to check for updates'.center(54))
-            print('[!]' + '& update the mapping table'.center(54))
             print("[!]" + "".center(54, "="))
+
+    # 映射表：网络优先 → 本地回退 → 两者都没有则放弃使用（不影响刮削）。
+    #   [mapping_table] switch=0  → 完全不使用映射表
+    #   [mapping_table] update=1  → 启动时先尝试联网下载/更新
+    #   [mapping_table] update=0  → 不联网，直接用本地文件（有则用，无则放弃）
+    if conf.mapping_table():
+        if conf.mapping_table_update():
             try:
-                etree.parse(str(Path.home() / '.local' / 'share' / 'mdc' / 'mapping_actor.xml'))
-            except:
-                print('[!]' + "Failed to load mapping table".center(54))
-                print('[!]' + "".center(54, "="))
+                # Download Mapping Table, parallel version
+                def fmd(f) -> typing.Tuple[str, Path]:
+                    base_url = conf.mapping_table_url()
+                    if "{file}" in base_url:
+                        url = base_url.replace("{file}", f)
+                    else:
+                        url = base_url.rstrip("/") + "/" + f
+                    return (url, conf.mapping_table_folder() / f)
+
+                map_tab = (fmd('mapping_actor.xml'), fmd('mapping_info.xml'), fmd('c_number.json'))
+                # 网络优先：缺失或过期的文件重新下载；先下载到 *.download 临时文件，
+                # 校验通过后才替换，失败时保留本地旧文件。
+                need_update = []
+                for k, v in map_tab:
+                    if not v.exists():
+                        need_update.append((k, v))
+                    elif file_modification_days(str(v)) >= conf.mapping_table_validity():
+                        print("[+]Mapping Table Out of date! Refreshing", str(v))
+                        need_update.append((k, v))
+                tmp_items = [(url, dest.with_name(dest.name + ".download"))
+                             for url, dest in need_update]
+                parallel_download_files(tmp_items)
+                for (_url, dest), (_url2, tmp) in zip(need_update, tmp_items):
+                    if _mapping_file_ok(tmp):
+                        tmp.replace(dest)
+                        print(f"[+] Mapping Table Downloaded to {dest}")
+                    else:
+                        try:
+                            tmp.unlink()
+                        except Exception:
+                            pass
+                        print(f"[-] Mapping Table Download failed or invalid: {dest}")
+            except Exception:
+                print("[!]" + " WARNING ".center(54, "="))
+                print('[!]' + '-- GITHUB CONNECTION FAILED --'.center(54))
+                print('[!]' + 'Update the mapping table failed'.center(54))
+                print('[!]' + 'Falling back to local mapping table'.center(54))
+                print("[!]" + "".center(54, "="))
+
+        # 网络优先之后，再确认本地是否有可用映射表；都没有则放弃使用映射表。
+        mdc_dir = conf.mapping_table_folder()
+        local_ok = (_mapping_file_ok(mdc_dir / 'mapping_actor.xml')
+                    or _mapping_file_ok(mdc_dir / 'mapping_info.xml'))
+        if not local_ok:
+            print("[!]" + " MAPPING TABLE UNAVAILABLE ".center(54, "="))
+            print('[!]' + '网络与本地均无可用映射表，已放弃使用映射表'.center(54))
+            print('[!]' + 'Scraping will continue without mapping table'.center(54))
+            print('[!]' + str(mdc_dir).center(54))
+            print("[!]" + "".center(54, "="))
 
     create_failed_folder(conf.failed_folder())
-    # 每次运行开始，在 failed_list.txt 末尾写入一条带时间的分隔行，用于分格/分批任务识别批次。
+    # 每次运行开始，在 failed_list.txt / unrecognized_list.txt 末尾各写入一条带时间的分隔行，
+    # 用于分格/分批任务识别批次。
     # 单文件模式、搜索模式下调用也无副作用（文件为空/不存在时不会写入）。
     sep_line = write_failed_list_separator()
     if sep_line:
         print(f"[+]Failed list separator: {sep_line}")
+    sep_line = write_unrecognized_list_separator()
+    if sep_line:
+        print(f"[+]Unrecognized list separator: {sep_line}")
 
     # create OpenCC converter
     ccm = conf.cc_convert_mode()
@@ -827,7 +906,7 @@ def period(delta, pattern):
 
 
 if __name__ == '__main__':
-    version = '6.6.7'
+    version = '6.6.8'
     urllib3.disable_warnings()  # Ignore http proxy warning
     app_start = time.time()
 

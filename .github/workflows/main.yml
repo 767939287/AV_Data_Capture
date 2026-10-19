@@ -1,6 +1,9 @@
 name: PyInstaller
 
-# 仅手动触发：在 GitHub 仓库页面 Actions 标签页选择本 workflow 后点击 "Run workflow" 运行。
+# 触发方式：
+#   1) 手动：在 Actions 页选择本 workflow 后点击 "Run workflow"；
+#   2) 发布 Release：在 GitHub 创建/发布 Release 时自动构建，并把压缩包上传到该 Release。
+# 构建平台：ubuntu-22.04、windows-latest（分别生成 Linux / Windows 压缩包）。
 # 已移除 push / pull_request 自动触发，避免每次提交都消耗构建配额。
 # 运行时可选择分支：
 #   - 使用 GitHub 界面上方的 "Use workflow from" 下拉框选择分支（原生支持）；
@@ -12,6 +15,12 @@ on:
         description: '要构建的分支（留空则使用界面上 "Use workflow from" 所选分支）'
         required: false
         default: ''
+  release:
+    types: [published]
+
+# 上传附件到 Release 需要写权限
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -19,8 +28,8 @@ jobs:
 
     strategy:
       matrix:
-        # os: [windows-latest, macos-latest, ubuntu-latest]
-        os: [ubuntu-22.04]
+        # Linux + Windows；macOS 需要时再自行加入
+        os: [ubuntu-22.04, windows-latest]
     steps:
       # branch 输入非空时 checkout 指定分支，否则 checkout 触发时选中的分支/提交
       - uses: actions/checkout@v2
@@ -79,9 +88,10 @@ jobs:
             --add-data "$(python -c 'import face_recognition_models as _; print(_.__path__[0])' | tail -n 1);face_recognition_models" `
             --add-data "Img;Img" `
             --add-data "scrapinglib;scrapinglib" `
-            --add-data "config.ini;." `
+            --add-data "config.ini;."
             
       - name: Copy config.ini
+        shell: bash
         run: |
           mkdir -p dist/
           cp config.ini dist/
@@ -93,14 +103,28 @@ jobs:
 
       - name: Set VERSION variable for windows
         if: matrix.os == 'windows-latest'
+        shell: pwsh
         run: |
-          echo "VERSION=$(python Movie_Data_Capture.py --version)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Add-Content -Path $env:GITHUB_ENV -Value "VERSION=$(python Movie_Data_Capture.py --version)"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: MDC-${{ env.VERSION }}-${{ runner.os }}-amd64
           path: dist
+
+      - name: Package release asset (Unix)
+        if: github.event_name == 'release' && runner.os != 'Windows'
+        run: |
+          cd dist
+          zip -r "../MDC-${VERSION}-${RUNNER_OS}-amd64.zip" .
+          cd ..
+
+      - name: Package release asset (Windows)
+        if: github.event_name == 'release' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/* -DestinationPath "MDC-$env:VERSION-$env:RUNNER_OS-amd64.zip" -Force
 
       - name: Run test (Ubuntu & MacOS)
         if: matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest'  || matrix.os == 'ubuntu-22.04'  || matrix.os == 'ubuntu-20.04'
@@ -109,4 +133,24 @@ jobs:
           touch YMDD-405.mp4
           touch STAR-437-C.mp4
           # touch 122922_001.mp4
-          ./Movie_Data_Capture
+          # -a：自动退出，避免 CI 中 input() 等待回车导致任务挂起/失败
+          ./Movie_Data_Capture -a
+
+      - name: Run test (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          cd dist
+          New-Item -ItemType File -Name YMDD-405.mp4 -Force | Out-Null
+          New-Item -ItemType File -Name STAR-437-C.mp4 -Force | Out-Null
+          # touch 122922_001.mp4
+          # -a：自动退出，避免 CI 中 input() 等待回车导致任务挂起/失败
+          .\Movie_Data_Capture.exe -a
+
+      - name: Upload release asset
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: MDC-${{ env.VERSION }}-${{ runner.os }}-amd64.zip
+          fail_on_unmatched_files: true

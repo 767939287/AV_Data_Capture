@@ -249,10 +249,11 @@ class Config:
         return self.conf.getboolean("common", "ignore_failed_list")
 
     def failed_list_separator(self) -> str:
-        """每次刮削任务开始时写入 failed_list.txt 的分隔行（[common] failed_list_separator）。
+        """每次刮削任务开始时写入列表文件的分隔行开关（[common] failed_list_separator）。
 
-        默认 "===="。用于把「每次运行失败的列表」分隔开，便于分格/分批任务识别批次。
-        留空则关闭自动分隔（不写入任何分隔行，保持与升级前一致）。
+        默认 "===="。同时作用于 failed_list.txt 与 unrecognized_list.txt，
+        用于把「每次运行记录的文件」分隔开，便于分格/分批任务识别批次。
+        留空则关闭自动分隔（不写入任何分隔行）。
         仅当文件已存在且非空、且最后一行不是该分隔行时才会追加，避免文件开头出现孤立分隔行或连续重复。
         """
         try:
@@ -308,8 +309,82 @@ class Config:
     def download_only_missing_images(self) -> bool:
         return self.conf.getboolean("common", "download_only_missing_images")
 
+    # ---------- 映射表配置读取 ----------
+    # 优先新位置 [mapping_table] 段；找不到时回退旧位置（[common] / [update]），
+    # 保证旧 config.ini 无需修改也能继续工作。
+    def _mapping_first(self, candidates):
+        """按顺序尝试 (section, key)，返回 (value_str, section, key)；都没有返回 (None, None, None)。"""
+        for sec, key in candidates:
+            try:
+                if self.conf.has_option(sec, key):
+                    return (self.conf.get(sec, key) or "").strip(), sec, key
+            except Exception:
+                continue
+        return None, None, None
+
+    def _mapping_bool(self, candidates, default=False) -> bool:
+        v, sec, key = self._mapping_first(candidates)
+        if v is None:
+            return default
+        try:
+            return self.conf.getboolean(sec, key)
+        except Exception:
+            return default
+
+    def _mapping_int(self, candidates, default=0) -> int:
+        v, sec, key = self._mapping_first(candidates)
+        if v is None:
+            return default
+        try:
+            return self.conf.getint(sec, key)
+        except Exception:
+            return default
+
+    def mapping_table(self) -> bool:
+        """是否使用映射表的总开关（[mapping_table] switch）。
+
+        0 = 完全不使用映射表（不读取、不下载，演员/标签/标题映射均不生效）；
+        1 = 使用（默认）。
+        兼容旧配置 [common] mapping_table；缺失/非法时返回 True。
+        """
+        return self._mapping_bool(
+            [("mapping_table", "switch"), ("common", "mapping_table")], True)
+
     def mapping_table_validity(self) -> int:
-        return self.conf.getint("common", "mapping_table_validity")
+        """映射表有效期(天)（[mapping_table] validity）。兼容旧键 [common] mapping_table_validity。"""
+        v = self._mapping_int(
+            [("mapping_table", "validity"), ("common", "mapping_table_validity")], 7)
+        return v if v >= 0 else 7
+
+    def mapping_table_folder(self) -> Path:
+        """映射表(MappingTable)存放目录（[mapping_table] folder）。
+
+        目录内包含 mapping_actor.xml / mapping_info.xml / c_number.json 三个文件。
+        留空或缺失 → ~/.local/share/mdc（默认，Windows 即
+        C:\\Users\\<用户名>\\.local\\share\\mdc）；
+        填目录     → 使用该目录（支持相对/绝对路径与 ~）。
+        兼容旧键 [common] mapping_table_folder。
+        """
+        raw, _sec, _key = self._mapping_first(
+            [("mapping_table", "folder"), ("common", "mapping_table_folder")])
+        if not raw:
+            return Path.home() / '.local' / 'share' / 'mdc'
+        raw = raw.replace("\\\\", "/").replace("\\", "/")
+        return Path(raw).expanduser()
+
+    def mapping_table_url(self) -> str:
+        """映射表下载地址（[mapping_table] url）。
+
+        留空或缺失 → 官方 GitHub raw 地址；
+        填基础 URL → 程序在末尾拼上文件名（mapping_actor.xml 等），自动补 '/'；
+        填含 {file} 的模板 → 直接把文件名替换进 {file}，适合自建镜像。
+        兼容旧键 [common] mapping_table_url。
+        """
+        default = ("https://raw.githubusercontent.com/yoshiko2/Movie_Data_Capture/"
+                   "master/MappingTable/")
+        v, _sec, _key = self._mapping_first(
+            [("mapping_table", "url"), ("common", "mapping_table_url")])
+        return v or default
 
     def jellyfin(self) -> int:
         return self.conf.getint("common", "jellyfin")
@@ -454,13 +529,37 @@ class Config:
             return ""
 
     def update_check(self) -> bool:
-        # [update] 段与自动更新/映射表下载功能已废弃。
-        # 配置文件中该段可能被整体注释掉，缺失时统一按“关闭更新检查”处理，
-        # 避免因缺少小节/键而抛异常中断程序。
+        """程序版本检查开关（[update] update_check）。
+
+        仅控制是否访问 api.github.com 检查新版本；与映射表下载完全解耦。
+        [update] 段缺失/被注释或值非法时返回 False（不检查）。
+        """
         try:
             return self.conf.getboolean("update", "update_check")
         except (ValueError, configparser.NoSectionError, configparser.NoOptionError):
             return False
+
+    def mapping_table_update(self) -> bool:
+        """映射表联网更新开关（[mapping_table] update）。
+
+        仅控制是否根据 [mapping_table] url / folder 下载、更新映射表；与版本检查解耦。
+        兼容旧位置 [common] mapping_table_update 与更旧的 [update] mapping_table_update，
+        均未配置时回退 [update] update_check。
+        总开关 [mapping_table] switch=0 时本项恒为 False。
+        """
+        if not self.mapping_table():
+            return False
+        v, sec, key = self._mapping_first([
+            ("mapping_table", "update"),
+            ("common", "mapping_table_update"),
+            ("update", "mapping_table_update"),
+        ])
+        if v is not None:
+            try:
+                return self.conf.getboolean(sec, key)
+            except Exception:
+                pass
+        return self.update_check()
 
     def sources(self) -> str:
         return self.conf.get("priority", "website")
@@ -476,6 +575,18 @@ class Config:
             return self.conf.getboolean("priority", "dmm_image", fallback=False)
         except Exception:
             return False
+
+    def priority_dmm_image_debug(self) -> bool:
+        """DMM 高清封面日志开关（位于 [priority] 段，键名 dmm_image_debug）。
+
+        1 开启：打印 DMM 封面升级的成功结果与具体失败原因；
+        0 关闭：静默（默认）。
+        未配置该键时跟随 [debug_mode] switch，保持升级前的使用习惯。
+        """
+        try:
+            return self.conf.getboolean("priority", "dmm_image_debug")
+        except Exception:
+            return self.debug()
 
     def priority_tag_source(self) -> str:
         """跨源标签来源刮削器（位于 [priority] 段，键名 tag_source）。
@@ -703,6 +814,13 @@ class Config:
 
         默认使用换行符 '\\n'。仅当 both_langs=1 时生效。
         支持在 ini 中原样书写转义序列（如 \\n 表示换行，\\t 表示制表符），程序会将其解释为真实字符。
+
+        关于 <br>：.nfo 的 <plot> 写在 CDATA 中，且元数据里的 '<'/'>' 会被
+        special_characters_replacement() 转义，HTML 标签不可能生效(前端只会显示字面文本)，
+        因此这里把 <br> / <br/> / <br /> / br 统一当作真实换行处理，避免用户踩坑。
+
+        注意：configparser 不解析引号，`both_langs_sep = "\\n"` 的值会带引号；
+        为容错，本项会自动去掉成对的单/双引号。
         """
         try:
             v = self.conf.get("storyline", "both_langs_sep", fallback="\\n")
@@ -710,9 +828,20 @@ class Config:
             v = "\\n"
         if not isinstance(v, str):
             v = "\\n"
-        # 支持用户在 ini 中书写 \n / \t 等转义序列；非法转义时原样返回
+        # configparser 不会解析引号：写成 both_langs_sep = "\\n" 时，值里会包含引号本身。
+        # 这里做容错：若整个值被成对的单/双引号包住，自动去掉这对引号。
+        v = v.strip()
+        if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+            v = v[1:-1]
+        # HTML 换行标签在 CDATA 中不会生效，等价映射为真实换行
+        if v.strip().lower() in ("<br>", "<br/>", "<br />", "br"):
+            v = "\\n"
+        # 支持用户在 ini 中书写 \n / \t / \u2028 等转义序列；非法转义时原样返回。
+        # 注意：不能直接用 utf-8 编码后 unicode_escape 解码，那样非 ASCII 字符
+        # (如 ｜ U+FF5C) 会按 latin-1 误解码成乱码；
+        # backslashreplace 会把非 latin-1 字符转成 \\uXXXX，再由 unicode_escape 还原。
         try:
-            return v.encode('utf-8').decode('unicode_escape')
+            return v.encode('latin-1', 'backslashreplace').decode('unicode_escape')
         except Exception:
             return v
 
@@ -814,11 +943,18 @@ class Config:
         conf.set(sec1, "failed_list_path", "")
         conf.set(sec1, "unrecognized_list_path", "")
         conf.set(sec1, "download_only_missing_images", "1")
-        conf.set(sec1, "mapping_table_validity", "7")
         conf.set(sec1, "jellyfin", "0")
         conf.set(sec1, "actor_only_tag", "0")
         conf.set(sec1, "sleep", "3")
         conf.set(sec1, "anonymous_fill", "0")
+
+        sec_mapping = "mapping_table"
+        conf.add_section(sec_mapping)
+        conf.set(sec_mapping, "switch", "1")
+        conf.set(sec_mapping, "validity", "7")
+        conf.set(sec_mapping, "folder", "")
+        conf.set(sec_mapping, "update", "1")
+        conf.set(sec_mapping, "url", "")
 
         sec2 = "advenced_sleep"
         conf.add_section(sec2)
@@ -850,6 +986,7 @@ class Config:
         conf.add_section(sec6)
         conf.set(sec6, "website", "airav,javbus,javdb,fanza,xcity,mgstage,fc2,fc2club,avsox,jav321,xcity")
         conf.set(sec6, "dmm_image", "0")
+        conf.set(sec6, "dmm_image_debug", "0")
         conf.set(sec6, "tag_source", "")
         conf.set(sec6, "tag_mode", "merge")
 

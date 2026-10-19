@@ -5,8 +5,6 @@ import secrets
 import typing
 import cfscrape
 
-from pathlib import Path
-
 # third party lib
 import opencc
 from lxml import etree
@@ -33,14 +31,22 @@ def get_data_from_json(
     :param specified_url: 指定的数据查询地址, 目前未使用
     :return 给定影片名称的具体信息
     """
-    try:
-        actor_mapping_data = etree.parse(str(Path.home() / '.local' / 'share' / 'mdc' / 'mapping_actor.xml'))
-        info_mapping_data = etree.parse(str(Path.home() / '.local' / 'share' / 'mdc' / 'mapping_info.xml'))
-    except:
-        actor_mapping_data = etree.fromstring("<html></html>", etree.HTMLParser())
-        info_mapping_data = etree.fromstring("<html></html>", etree.HTMLParser())
-
     conf = config.getInstance()
+    # 空映射表（不使用映射表时的默认值）
+    actor_mapping_data = etree.fromstring("<html></html>", etree.HTMLParser())
+    info_mapping_data = etree.fromstring("<html></html>", etree.HTMLParser())
+    if conf.mapping_table():
+        try:
+            mdc_dir = conf.mapping_table_folder()
+            actor_mapping_data = etree.parse(str(mdc_dir / 'mapping_actor.xml'))
+            info_mapping_data = etree.parse(str(mdc_dir / 'mapping_info.xml'))
+        except Exception as e:
+            # 本地映射表缺失/损坏：放弃使用映射表（空表），继续刮削
+            if conf.debug():
+                print(f'[-]Mapping table load failed: {e}')
+            actor_mapping_data = etree.fromstring("<html></html>", etree.HTMLParser())
+            info_mapping_data = etree.fromstring("<html></html>", etree.HTMLParser())
+
     # default fetch order list, from the beginning to the end
     sources = conf.sources()
 
@@ -243,9 +249,14 @@ def get_data_from_json(
         for translate_value in translate_values:
             if json_data[translate_value] == "":
                 continue
-            if translate_value == "title":
-                title_dict = json.loads(
-                    (Path.home() / '.local' / 'share' / 'mdc' / 'c_number.json').read_text(encoding="utf-8"))
+            if translate_value == "title" and conf.mapping_table():
+                try:
+                    title_dict = json.loads(
+                        (conf.mapping_table_folder() / 'c_number.json').read_text(encoding="utf-8"))
+                except Exception as e:
+                    title_dict = {}
+                    if conf.debug():
+                        print(f'[-]c_number.json load failed: {e}')
                 try:
                     json_data[translate_value] = title_dict[number]
                     continue
@@ -365,29 +376,42 @@ def get_data_from_json(
     #   1) [dmm_image] switch          : 数据源本就是 DMM/FANZA 时，把封面换成其高清 CDN 图。
     #   2) [priority]  dmm_image       : 数据源不是 DMM 时，额外按番号去 DMM 取高清封面替换(跨源)。
     # 说明：本地项目中海报由封面图派生，故只需处理 cover 即可同时作用于封面与海报。
-    # 失败时静默保留原封面，仅 debug 模式打印一行原因，绝不因升级失败影响刮削结果。
+    # 日志：[priority] dmm_image_debug=1 时打印成功/失败详情；=0 时静默。
+    # 失败永远保留原封面，绝不因升级失败影响刮削结果。
     try:
         from scrapinglib import dmm_image
         original_cover = json_data.get('cover') or ''
         new_cover = ''
+        used_by = ''
+        dmm_debug = conf.priority_dmm_image_debug()
 
         if original_cover and conf.dmm_image_switch():
             # 1) 数据源本身是 DMM：直接升级其低清封面为高清 CDN 图
             new_cover = dmm_image.upgrade_cover(original_cover, proxies=proxies, verify=ca_cert)
+            if new_cover and new_cover != original_cover:
+                used_by = '[dmm_image]'
+            elif dmm_debug:
+                print(f'[-]DMM cover not upgraded for {number}: '
+                      f'源封面非 DMM 图片或高清候选均未通过校验；keep source cover.')
 
         if not new_cover and conf.priority_dmm_image():
             # 2) 跨源：按番号去 DMM 搜索取高清封面（仅当来源非 DMM 或上一步未命中时）
-            new_cover = dmm_image.cross_source_cover(number, proxies=proxies, verify=ca_cert)
-            if not new_cover and conf.debug():
-                print(f'[-]DMM cover not found for {number}, keep source cover.')
+            #    取不到时把具体失败原因（番号/搜索/HTTP/类型/体积/分辨率）汇总打印出来。
+            new_cover, dmm_reason = dmm_image.cross_source_cover_ex(
+                number, proxies=proxies, verify=ca_cert)
+            if new_cover:
+                used_by = '[priority] dmm_image'
+            elif dmm_debug:
+                print(f'[-]DMM cover not found for {number}: {dmm_reason}; keep source cover.')
 
         if new_cover and new_cover != original_cover:
             json_data['cover'] = new_cover
-            if conf.debug():
-                print(f'[+]DMM cover upgraded for {number}.')
+            if dmm_debug:
+                print(f'[+]DMM cover upgraded for {number} by {used_by}: '
+                      f'{original_cover} -> {new_cover}')
     except Exception as e:
         # 升级失败一律吞掉，保留原封面
-        if conf.debug():
+        if conf.priority_dmm_image_debug():
             print(f'[-]DMM image upgrade skipped: {e}')
     # ==================== DMM/FANZA 高清图升级 END ====================
 
