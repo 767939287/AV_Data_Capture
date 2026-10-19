@@ -1,10 +1,10 @@
 <h1 align="center">Movie Data Capture</h1>
 
-[English](https://github.com/yoshiko2/Movie_Data_Capture/blob/master/README_EN.md)
+[English](https://github.com/767939287/Movie_Data_Capture/blob/master/README_EN.md)
 
 ![](https://img.shields.io/badge/build-passing-brightgreen.svg?style=flat)
-![](https://img.shields.io/github/license/yoshiko2/Movie_data_capture.svg?style=flat)
-![](https://img.shields.io/github/release/yoshiko2/Movie_data_capture.svg?style=flat)
+![](https://img.shields.io/github/license/767939287/Movie_data_capture.svg?style=flat)
+![](https://img.shields.io/github/release/767939287/Movie_data_capture.svg?style=flat)
 ![](https://img.shields.io/badge/Python-3.9-yellow.svg?style=flat&logo=python)<br>
 [Docker 版本](https://github.com/vergilgao/docker-mdc)  
 ![](https://img.shields.io/badge/build-passing-brightgreen.svg?style=flat)
@@ -16,10 +16,8 @@
 1
 **严禁在墙内的社交平台上宣传此项目**
 
-* [官方Twitter](https://twitter.com/mdac_official)
-
 # 文档
-* [官方教程WIKI](https://github.com/yoshiko2/Movie_Data_Capture/wiki)
+* [官方教程WIKI](https://github.com/767939287/Movie_Data_Capture/wiki)
 * [VergilGao's Docker部署](https://github.com/VergilGao/docker-mdc)
 
 # 申明
@@ -33,17 +31,17 @@
 * 用户仅能在自己的私人计算机或者测试环境中使用该工具，禁止将获取到的数据用于商业目的或其他目的，如销售、传播等
 * 用户在使用本项目和项目成果前，请用户了解并遵守当地法律法规，如果本项目及项目成果使用过程中存在违反当地法律法规的行为，请勿使用该项目及项目成果
 * 法律后果及使用后果由使用者承担
-* [GPL LICENSE](https://github.com/yoshiko2/Movie_Data_Capture/blob/master/LICENSE)
+* [GPL LICENSE](https://github.com/767939287/Movie_Data_Capture/blob/master/LICENSE)
 * 若用户不同意上述条款任意一条，请勿使用本项目和项目成果
 
 # 下载
-* [Releases](https://github.com/yoshiko2/Movie_Data_Capture/releases/latest)
+* [Releases](https://github.com/767939287/Movie_Data_Capture/releases/latest)
 
 # 贡献者
-[![](https://opencollective.com/movie_data_capture/contributors.svg?width=890)](https://github.com/yoshiko2/movie_data_Capture/graphs/contributors)
+[![](https://opencollective.com/movie_data_capture/contributors.svg?width=890)](https://github.com/767939287/movie_data_Capture/graphs/contributors)
 
 # 友情链接
 * [CloudDrive](https://www.clouddrive2.com/)
 
 # Star History
-[![Star History Chart](https://api.star-history.com/svg?repos=yoshiko2/Movie_Data_Capture&type=Date)](https://star-history.com/#yoshiko2/Movie_Data_Capture&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=767939287/Movie_Data_Capture&type=Date)](https://star-history.com/#767939287/Movie_Data_Capture&Date)
