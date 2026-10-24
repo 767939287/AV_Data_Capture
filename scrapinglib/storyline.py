@@ -271,7 +271,7 @@ def getStoryline_mp(args):
 def getStoryline_airav(number, debug, proxies, verify, timeout=None):
     url = ''
     try:
-        site = secrets.choice(('airav.io'))
+        site = secrets.choice(('airav.io',))
         url = f'https://{site}/searchresults.aspx?Search={number}&Type=0'
         session = httprequest.request_session(proxies=proxies, verify=verify, retry=0, timeout=timeout)
         res = session.get(url, timeout=timeout)
