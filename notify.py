@@ -80,9 +80,12 @@ def begin_run():
     except Exception:
         reset_hours = 12
     last = float(state.get('updated_at') or 0)
-    if not state or (reset_hours > 0 and now - last > reset_hours * 3600):
+    # 上一批已达标（completed）或超过重置间隔，都开启新任务
+    if (not state or state.get('completed')
+            or (reset_hours > 0 and now - last > reset_hours * 3600)):
         state = {'started_at': now, 'updated_at': now,
-                 'success': 0, 'failed': 0, 'unknown': 0, 'rounds': 0}
+                 'success': 0, 'failed': 0, 'unknown': 0, 'rounds': 0,
+                 'completed': False}
     state['rounds'] = int(state.get('rounds') or 0) + 1
     _batch.clear()
     _batch.update(state)
@@ -114,6 +117,8 @@ def _conf():
         'mode': c.telegram_mode(),
         'notify_failed': c.telegram_notify_failed(),
         'proxy': c.telegram_proxy(),
+        'target': c.telegram_cumulative_target(),
+        'progress': c.telegram_cumulative_progress(),
     }
 
 
@@ -193,13 +198,27 @@ def notify_summary(duration=''):
     if cumulative:
         rounds = int(_batch.get('rounds') or 1)
         batch_total = sum(int(_batch.get(k) or 0) for k in ('success', 'failed', 'unknown'))
-        lines = [f'📊 <b>刮削完成</b>（第 {rounds} 轮）',
+        target = int(conf.get('target') or 0)
+        reached = target <= 0 or batch_total >= target
+        # 设了目标且尚未达标、又不希望发进度时，直接存盘并跳过本条
+        if target > 0 and not reached and not conf.get('progress', True):
+            _save_state()
+            return False
+
+        if target > 0:
+            head = (f'📊 <b>刮削全部完成</b>（{batch_total}/{target}）' if reached
+                    else f'📊 <b>刮削进度</b>（{batch_total}/{target}，第 {rounds} 轮）')
+        else:
+            head = f'📊 <b>刮削完成</b>（第 {rounds} 轮）'
+        lines = [head,
                  f"本轮：成功 {_stats['success']} / 失败 {_stats['failed']} / 未识别 {_stats['unknown']} / 合计 {round_total}",
                  f"累计：成功 {_batch.get('success', 0)} / 失败 {_batch.get('failed', 0)} / "
                  f"未识别 {_batch.get('unknown', 0)} / 合计 {batch_total}"]
         started = _batch.get('started_at')
         if started:
             lines.append(f"开始：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(float(started)))}")
+        if target > 0 and reached:
+            _batch['completed'] = True
     else:
         lines += [f"成功：{_stats['success']}",
                   f"失败：{_stats['failed']}",

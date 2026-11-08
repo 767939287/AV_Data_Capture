@@ -560,6 +560,20 @@ class Config:
         except Exception:
             return 12.0
 
+    def telegram_cumulative_target(self) -> int:
+        """一个任务的总条数；达到后只发一条最终汇总。0=不限制（每轮都发）。"""
+        try:
+            return max(0, self.conf.getint('telegram', 'cumulative_target', fallback=0))
+        except Exception:
+            return 0
+
+    def telegram_cumulative_progress(self) -> bool:
+        """设置累计目标时，未达标前是否也发本轮进度（0=只发最后一条）。"""
+        try:
+            return self.conf.getboolean('telegram', 'cumulative_progress', fallback=True)
+        except Exception:
+            return True
+
     def media_type(self) -> str:
         return self.conf.get('media', 'media_type')
 
@@ -1155,6 +1169,8 @@ class Config:
         conf.set(sec21, "proxy", "")
         conf.set(sec21, "cumulative", "1")
         conf.set(sec21, "cumulative_reset_hours", "12")
+        conf.set(sec21, "cumulative_target", "0")
+        conf.set(sec21, "cumulative_progress", "1")
 
         return conf
 
