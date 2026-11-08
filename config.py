@@ -794,6 +794,7 @@ class Config:
 
         采用 fallback 防御式读取，保证旧 config.ini 无 [cloudflare] 段时零副作用：
         switch=0 时 enable 为 False，程序行为与改动前完全一致。
+        solver_first / solver_reuse_ttl 缺失时回退到「自动升级 + 600s 复用」默认值。
         """
         try:
             sec = "cloudflare"
@@ -803,7 +804,18 @@ class Config:
             timeout = self.conf.getint(sec, "timeout", fallback=CloudflareConf.DEFAULT_TIMEOUT)
             sites = self._parse_host_list(self.conf.get(sec, "sites", fallback=""))
             trusted = self._parse_host_list(self.conf.get(sec, "cf_trusted_hosts", fallback=""))
-            return CloudflareConf(switch, service, host, timeout, sites, trusted)
+            # 单项非法（如写了 yes/no 以外的值）只回退该项，不把整段判成「已禁用」
+            try:
+                solver_first = self.conf.getboolean(sec, "solver_first", fallback=True)
+            except ValueError:
+                solver_first = True
+            try:
+                reuse_ttl = self.conf.getint(
+                    sec, "solver_reuse_ttl", fallback=CloudflareConf.DEFAULT_REUSE_TTL)
+            except ValueError:
+                reuse_ttl = CloudflareConf.DEFAULT_REUSE_TTL
+            return CloudflareConf(switch, service, host, timeout, sites, trusted,
+                                  solver_first, reuse_ttl)
         except Exception:
             # 任何读取异常都不应影响主流程，直接返回「已禁用」默认值
             return CloudflareConf(False, "flaresolverr", CloudflareConf.DEFAULT_HOST,
@@ -1283,13 +1295,23 @@ class CloudflareConf():
     封装外部 Cloudflare 挑战绕过服务（TRAWL / FlareSolverr）的开关、服务类型、
     服务地址、超时与站点白名单，并提供白名单命中判断。
     字段缺失或取值异常时一律回退到「关闭」的安全默认值，保证零副作用。
+
+    solver-first 相关：
+      - solver_first=True：白名单站点、以及曾经命中过 CF 挑战的站点，后续请求
+        不再先打直连，直接交给外部 CF 服务；
+      - solver_reuse_ttl：solver 成功后的 cookie 复用窗口（秒），窗口内先直连
+        并自动带上 solver 解出的 cookie，直连又被拦才重新进 solver。0 = 不复用。
     """
 
     DEFAULT_HOST = "http://127.0.0.1:8191"
     DEFAULT_TIMEOUT = 60
+    # solver 成功后 cookie 复用窗口的默认秒数（与 MDCx v20261108 一致）
+    DEFAULT_REUSE_TTL = 600
 
     def __init__(self, switch, service: str, host: str, timeout: int,
-                 sites: list, trusted_hosts: list):
+                 sites: list, trusted_hosts: list,
+                 solver_first: bool = True,
+                 solver_reuse_ttl: int = DEFAULT_REUSE_TTL):
         """ 保存原始配置值
 
         :param switch: 原始开关值（'0'/'1'/0/1 等）
@@ -1298,6 +1320,8 @@ class CloudflareConf():
         :param timeout: 超时秒数
         :param sites: 生效站点 host 列表（已小写、去空白）
         :param trusted_hosts: 落地域名校验列表
+        :param solver_first: 命中过 CF 挑战的站点是否自动升级为「先走 solver」
+        :param solver_reuse_ttl: solver 成功后 cookie 复用窗口（秒），0=不复用
         """
         # switch 兼容 bool（getboolean）与 '0'/'1' 字符串两种来源
         self.enable = switch == '1' or switch == 1
@@ -1317,6 +1341,14 @@ class CloudflareConf():
             self.timeout = self.DEFAULT_TIMEOUT
         self.sites = list(sites or [])
         self.trusted_hosts = list(trusted_hosts or [])
+        # solver_first 缺失/非法时保持开启（等价于 MDCx 的默认值 1）
+        self.solver_first = bool(solver_first)
+        try:
+            ttl = int(solver_reuse_ttl)
+        except (TypeError, ValueError):
+            ttl = self.DEFAULT_REUSE_TTL
+        # 负数视为「不复用」，避免出现永远不过期的窗口
+        self.solver_reuse_ttl = max(0, ttl)
 
     def is_whitelisted(self, url: str) -> bool:
         """ 判断 URL 的 host 是否命中生效站点白名单

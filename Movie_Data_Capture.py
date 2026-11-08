@@ -975,7 +975,7 @@ def period(delta, pattern):
 
 
 if __name__ == '__main__':
-    version = '6.6.8'
+    version = '6.6.9'
     urllib3.disable_warnings()  # Ignore http proxy warning
     _force_utf8_console()  # Windows 控制台非 UTF-8 代码页下，中文输出会直接崩溃
     app_start = time.time()

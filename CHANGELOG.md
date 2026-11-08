@@ -1,5 +1,24 @@
 # 更新日志
 
+## [6.6.9] - 2026-11-08
+
+### 新增
+
+- **Cloudflare 挑战改走 solver-first**
+  - `[cloudflare] solver_first`（默认 `1`）：命中过 Cloudflare 挑战的站点，后续请求
+    不再先打直连，直接交给外部 CF 服务（TRAWL / FlareSolverr）；solver 失败才回退直连。
+    设 `0` 则恢复「只对 `sites` 白名单生效」的旧行为。
+  - `[cloudflare] solver_reuse_ttl`（默认 `600` 秒）：solver 成功后的 cookie 复用窗口。
+    窗口内该站点先直连，并自动带上 solver 解出的 `cf_clearance` 等 cookie；直连又被拦
+    才清窗口、下一次重新进 solver。`0` = 不复用（每个请求都走 solver）。
+  - 各通道直连命中挑战时（`requests` 的 `get`/`post`、session 适配器、cloudscraper、
+    mechanicalsoup 表单）同一次调用内改走 solver；solver 不可用时保持旧行为，
+    把原响应交回调用方。
+  - 挑战识别：状态码 403/503 + 挑战页特征标记，或响应头 `cf-mitigated: challenge`；
+    正常页里注入的 `cdn-cgi/challenge-platform` 脚本不会造成误判。
+  - TRAWL 原生 `/scrape` 请求新增 `sessionId=adc-{host}`，外部服务可据此按站点隔离会话，
+    solver 侧日志也能看出是哪个站触发的。
+
 ## [6.6.8] - 2026-10-19
 
 ### 新增

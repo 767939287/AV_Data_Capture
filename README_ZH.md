@@ -25,12 +25,17 @@
 switch = 1
 service = flaresolverr   ; 或 trawl
 host = http://127.0.0.1:8191
+solver_first = 1
+solver_reuse_ttl = 600
 sites = javdb.com,javdbapi.com,javlibrary.com,jav321.com
 ```
 
 * 默认 `switch = 0`（关闭），保持原有直连行为不变。
-* 仅对 `sites` 白名单内的域名生效，其余站点仍走直连。
-* `service` 支持 `flaresolverr` 与 `trawl` 两种外部服务（TRAWL 亦兼容 FlareSolverr 协议）。
+* `sites` 白名单内的域名始终走外部 CF 服务，不再先试直连。
+* `solver_first = 1`（默认）：未列白名单、但**命中过 Cloudflare 挑战**的站点，后续请求也会自动跳过直连直接走 CF 服务（solver 失败才回退直连）。设 `0` 则只对白名单生效。
+* `solver_reuse_ttl`：solver 成功后的 cookie 复用窗口（秒，默认 600）。窗口内该站点先直连并自动带上 solver 解出的 `cf_clearance` 等 cookie，直连又被拦才清窗口、下一次重新进 solver；设 `0` 则每个请求都走 solver。
+* 挑战识别按「403/503 + 挑战页特征」或响应头 `cf-mitigated: challenge`，不会把正常页误判为挑战。
+* `service` 支持 `flaresolverr` 与 `trawl` 两种外部服务（TRAWL 亦兼容 FlareSolverr 协议）；TRAWL 原生 `/scrape` 请求会带 `sessionId=adc-{host}`，便于服务端按站点隔离会话。
 
 # 申明
 当你查阅、下载了本项目源代码或二进制程序，即代表你接受了以下条款

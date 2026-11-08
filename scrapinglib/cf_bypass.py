@@ -10,12 +10,19 @@
     响应体 {"status":"ok"|"error","message"?,
             "solution":{"url","status","response","cookies":[...]}}
 - TRAWL 原生：POST {host}/scrape（仅 GET/HEAD）
-    请求体 {"url","maxTimeout"}
+    请求体 {"url","maxTimeout","sessionId"?}
     响应体 {"url","statusCode","html","cookies":[...]}
   TRAWL 同时提供 FlareSolverr v1 兼容端点，故原生解析失败时可回退 /v1。
 - 503=浏览器池初始化中，429=池饱和，二者属于可重试错误。
+
+solver-first 调度：
+- 白名单站点、或命中过 CF 挑战的站点直接走 solver（``should_use_solver``）；
+- solver 成功后开 cookie 复用窗口，窗口内先直连（自动带 solver cookie），
+  直连又被拦才清窗口、下次重新进 solver（见 mark_solver_success / mark_challenge_hit）。
 """
 
+import re
+import threading
 import time
 from dataclasses import dataclass
 from typing import Dict, Optional
@@ -30,10 +37,205 @@ CF_CHALLENGE_MARKERS = (
     'just a moment', 'cf-chl', 'cdn-cgi/challenge-platform', 'cf-challenge',
 )
 
+# 只有这些状态码 + 特征标记同时成立才判定为挑战页。
+# 刻意不收 200：CF 也会给正常页面注入 /cdn-cgi/challenge-platform 脚本，
+# 只按内容判断会把正常响应误判成挑战。
+_CF_CHALLENGE_STATUS = (403, 503)
+
 # 两次对 CF 服务请求之间的最小间隔(秒)，避免高频冲击服务
 _MIN_REQUEST_INTERVAL = 2.0
 # 可重试错误的默认最大重试轮数
 _DEFAULT_RETRY_ROUNDS = 2
+# solver 成功后 cookie 复用窗口的默认秒数（0 = 不复用，每次请求都走 solver）
+DEFAULT_REUSE_TTL = 600.0
+
+# ---------------------------------------------------------------------------
+# solver-first 状态（进程内共享）
+#
+# 设计对齐 MDCx v20261108：
+#   1. 白名单站点、或曾经命中过 Cloudflare 挑战的站点，后续请求不再先打直连，
+#      直接交给外部 CF 服务；
+#   2. solver 成功后开一个 cookie 复用窗口：窗口内该站点先直连（自动带上 solver
+#      解出的 cf_clearance 等 cookie），直连又被拦才清窗口、下一次重新进 solver——
+#      这是 FlareSolverr/TRAWL 的常规用法，不必每个请求都开浏览器解挑战；
+#   3. solver 失败时由调用方回退直连，不判死。
+#
+# 状态随进程生命周期存在；加锁是因为刮削器可能多线程调度。
+# ---------------------------------------------------------------------------
+_state_lock = threading.Lock()
+# host -> 命中 CF 挑战的次数（>0 即视为「该站后续走 solver」）
+_challenge_hits: Dict[str, int] = {}
+# host -> 复用窗口截止时刻（time.monotonic）
+_reuse_until: Dict[str, float] = {}
+# host -> solver 解出的 cookie（name -> value）
+_solver_cookies: Dict[str, Dict[str, str]] = {}
+
+
+def host_of(url: str) -> str:
+    """取 URL 的小写 hostname（解析失败返回空串）。
+
+    :param url: 目标 URL
+    :return: hostname，如 javdb.com
+    """
+    try:
+        return (urlsplit(str(url or "")).hostname or "").strip().lower()
+    except Exception:
+        return ""
+
+
+def session_id_for(url: str) -> str:
+    """按目标站点生成 solver 会话标识：``adc-{host}``（host 里的非法字符换成 ``-``）。
+
+    外部服务据此按站点隔离浏览器会话，solver 侧日志也能看出是哪个站触发的。
+
+    :param url: 目标 URL
+    :return: 会话标识；url 无 host 时返回空串（调用方据此不写该字段）
+    """
+    host = host_of(url)
+    if not host:
+        return ""
+    safe = re.sub(r"[^a-z0-9.-]+", "-", host).strip("-")
+    return f"adc-{safe}" if safe else ""
+
+
+def solver_reuse_active(url: str) -> bool:
+    """该站点是否还在 solver cookie 复用窗口内（窗口内优先直连带 cookie）。
+
+    :param url: 目标 URL
+    :return: 窗口有效返回 True；过期会顺手清理
+    """
+    host = host_of(url)
+    if not host:
+        return False
+    with _state_lock:
+        deadline = _reuse_until.get(host, 0.0)
+        if deadline <= 0:
+            return False
+        if time.monotonic() >= deadline:
+            _reuse_until.pop(host, None)
+            return False
+        return True
+
+
+def mark_solver_success(url: str, cookies: Optional[Dict[str, str]] = None,
+                        ttl: Optional[float] = None) -> None:
+    """solver 成功：记录该站点的 cookie 并开（或续）复用窗口。
+
+    :param url: 刚被 solver 解出的目标 URL
+    :param cookies: solver 返回的 cookies（name -> value）
+    :param ttl: 复用窗口秒数，缺省用 DEFAULT_REUSE_TTL；<=0 表示不复用
+    """
+    host = host_of(url)
+    if not host:
+        return
+    try:
+        window = float(DEFAULT_REUSE_TTL if ttl is None else ttl)
+    except (TypeError, ValueError):
+        window = DEFAULT_REUSE_TTL
+    if window <= 0:
+        return
+    with _state_lock:
+        if cookies:
+            _solver_cookies[host] = dict(cookies)
+        _reuse_until[host] = time.monotonic() + window
+
+
+def mark_challenge_hit(url: str) -> None:
+    """直连命中 CF 挑战：记一次账，并清掉复用窗口（解出的 cookie 已失效）。
+
+    :param url: 命中挑战的请求 URL
+    """
+    host = host_of(url)
+    if not host:
+        return
+    with _state_lock:
+        _challenge_hits[host] = _challenge_hits.get(host, 0) + 1
+        _reuse_until.pop(host, None)
+
+
+def solver_cookies_for(url: str) -> Dict[str, str]:
+    """取 solver 为该站点解出的 cookie（副本；无则空 dict）。
+
+    :param url: 目标 URL
+    :return: cookie 字典
+    """
+    host = host_of(url)
+    if not host:
+        return {}
+    with _state_lock:
+        return dict(_solver_cookies.get(host) or {})
+
+
+def should_use_solver(url: str, conf) -> bool:
+    """该请求是否跳过直连、直接交给外部 CF 服务。
+
+    成立条件（任一，且总开关开启、不在 cookie 复用窗口内）：
+      - 命中 ``[cloudflare] sites`` 白名单（首次也不试直连）；
+
+      - 该 host 之前命中过 CF 挑战（``solver_first=1`` 时才启用自动升级）。
+
+    例外：solver 刚解过、cookie 还在复用窗口内时先走直连——解一次用一段时间，
+    直连又被拦会清掉窗口，下一次重新进 solver。
+
+    :param url: 目标 URL
+    :param conf: CloudflareConf 实例
+    :return: 需要走 solver 返回 True
+    """
+    if not url or conf is None or not getattr(conf, "enable", False):
+        return False
+    if solver_reuse_active(url):
+        return False
+    if conf.is_whitelisted(url):
+        return True
+    if not getattr(conf, "solver_first", True):
+        return False
+    host = host_of(url)
+    if not host:
+        return False
+    with _state_lock:
+        return _challenge_hits.get(host, 0) > 0
+
+
+def is_cf_challenge_response(response, text: Optional[str] = None) -> bool:
+    """判断直连响应是否为 Cloudflare 挑战页。
+
+    判据（避免误伤正常页面）：
+      - 响应头 ``cf-mitigated: challenge``；或
+      - 状态码 403/503 且正文含 CF 挑战特征标记。
+
+    :param response: requests.Response（可为 mechanicalsoup 返回的响应）
+    :param text: 可选的正文（缺省取 response.text）
+    :return: 命中挑战返回 True
+    """
+    if response is None:
+        return False
+    headers = getattr(response, "headers", None) or {}
+    try:
+        if str(headers.get("cf-mitigated", "")).strip().lower() == "challenge":
+            return True
+    except Exception:
+        pass
+    try:
+        status = int(getattr(response, "status_code", 0) or 0)
+    except (TypeError, ValueError):
+        status = 0
+    if status not in _CF_CHALLENGE_STATUS:
+        return False
+    if text is None:
+        try:
+            text = response.text
+        except Exception:
+            text = ""
+    lowered = str(text or "").lower()
+    return any(marker in lowered for marker in CF_CHALLENGE_MARKERS)
+
+
+def reset_state() -> None:
+    """清空 solver-first 状态（供测试/诊断使用）。"""
+    with _state_lock:
+        _challenge_hits.clear()
+        _reuse_until.clear()
+        _solver_cookies.clear()
 
 
 class CFBypassError(Exception):
@@ -242,6 +444,11 @@ class CFBypassClient:
         if self.conf.service == "trawl" and method_up == "GET":
             try:
                 payload = {"url": url, "maxTimeout": int(self.conf.timeout) * 1000}
+                # sessionId 让外部服务知道这次请求属于哪个站点（按站点隔离会话/统计），
+                # 也方便在 solver 侧日志里一眼看出是谁触发的。TRAWL 原生 schema 支持该字段。
+                session_id = session_id_for(url)
+                if session_id:
+                    payload["sessionId"] = session_id
                 resp = self._post_json(self._endpoint("/scrape"), payload)
                 return self._parse_trawl_native(self._resp_json(resp), url)
             except CFBypassError as e:
