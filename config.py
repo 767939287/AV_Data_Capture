@@ -15,6 +15,9 @@ G_conf_override = {
     # no need anymore
 }
 
+# [priority] prefix_source 中已提示过“前缀过短”的前缀（避免每个番号重复提示）
+G_prefix_too_short_warned = set()
+
 
 def getInstance(path: str = None):
     if isinstance(G_conf_override[0], Config):
@@ -713,6 +716,9 @@ class Config:
             prefix_source = SSIS=javbus, FC2=fc2, CARIB=carib
         前缀与番号都会去掉 - _ 空格 等分隔符并转大写后再比较，
         所以 'FC2-PPV' 与 'fc2ppv' 等价。配置非法时返回空列表。
+
+        前缀长度必须 >= 3：过短的前缀（如 'S'、'AB'）会把无关番号一起命中，
+        这类规则直接忽略，并只提示一次（避免每个番号重复刷屏）。
         """
         try:
             raw = self.conf.get("priority", "prefix_source", fallback="") or ""
@@ -725,8 +731,21 @@ class Config:
             prefix, source = item.split("=", 1)
             prefix = re.sub(r"[^0-9a-zA-Z]", "", prefix).upper()
             source = (source or "").strip().lower()
-            if prefix and source:
-                pairs.append((prefix, source))
+            if not (prefix and source):
+                continue
+            if len(prefix) < 3:
+                # 过短的规则直接忽略；提示仅在调试模式下打印，且同一前缀只提示一次。
+                if prefix not in G_prefix_too_short_warned:
+                    G_prefix_too_short_warned.add(prefix)
+                    try:
+                        debug = self.debug()
+                    except Exception:
+                        debug = False
+                    if debug:
+                        print(f"[!]Ignore prefix_source rule '{prefix}={source}': "
+                              f"prefix must be at least 3 characters.")
+                continue
+            pairs.append((prefix, source))
         return pairs
 
     def prefix_source_for(self, number: str) -> str:
