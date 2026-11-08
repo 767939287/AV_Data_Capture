@@ -123,6 +123,39 @@ is performed. It may help you correct wrong numbers before real job.""")
     return args.file, args.number, args.logdir, args.regexstr, args.zero_op, no_net_op, args.search, args.specified_source, args.specified_url
 
 
+def _force_utf8_console():
+    """把 stdout/stderr 切换为 UTF-8，避免 Windows 控制台默认代码页（如 cp1252/cp936）
+    在输出中文时抛 UnicodeEncodeError。
+
+    PyInstaller 窗口模式下 sys.stdout 可能为 None，reconfigure 也可能不可用，
+    任何失败都静默忽略，不影响程序运行。
+    """
+    for name in ('stdout', 'stderr'):
+        stream = getattr(sys, name, None)
+        if stream is None or not hasattr(stream, 'reconfigure'):
+            continue
+        try:
+            stream.reconfigure(encoding='utf-8', errors='replace')
+        except Exception:
+            pass
+
+
+def _safe_write(stream, msg):
+    """向终端写日志，终端编码不支持时降级为可替换字符，绝不抛异常。"""
+    if stream is None:
+        return
+    try:
+        stream.write(msg)
+    except UnicodeEncodeError:
+        enc = getattr(stream, 'encoding', None) or 'utf-8'
+        try:
+            stream.write(msg.encode(enc, 'replace').decode(enc, 'replace'))
+        except Exception:
+            pass
+    except (AttributeError, ValueError, OSError):
+        pass
+
+
 class OutLogger(object):
     def __init__(self, logfile) -> None:
         self.term = sys.stdout
@@ -139,7 +172,7 @@ class OutLogger(object):
         self.close()
 
     def write(self, msg):
-        self.term.write(msg)
+        _safe_write(self.term, msg)
         self.log.write(msg)
 
     def flush(self):
@@ -908,6 +941,7 @@ def period(delta, pattern):
 if __name__ == '__main__':
     version = '6.6.8'
     urllib3.disable_warnings()  # Ignore http proxy warning
+    _force_utf8_console()  # Windows 控制台非 UTF-8 代码页下，中文输出会直接崩溃
     app_start = time.time()
 
     # 项目切换配置文件：支持 --config-file <path> 指定配置文件，

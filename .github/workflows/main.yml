@@ -25,6 +25,11 @@ permissions:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    # Windows runner 默认代码页不是 UTF-8（cp1252/cp936），中文输出会导致
+    # UnicodeEncodeError 直接终止程序；这两个变量让 Python 始终以 UTF-8 处理标准流。
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
 
     strategy:
       matrix:
@@ -140,6 +145,10 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
+          # 控制台代码页切到 UTF-8，避免程序输出的中文被按 cp1252 解码/编码
+          chcp 65001 | Out-Null
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
           cd dist
           New-Item -ItemType File -Name YMDD-405.mp4 -Force | Out-Null
           New-Item -ItemType File -Name STAR-437-C.mp4 -Force | Out-Null
