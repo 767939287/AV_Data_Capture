@@ -86,6 +86,9 @@ celerybeat-schedule
 .venv
 # Python 3.12 升级时保留的旧环境备份，不要提交
 .venv310/
+
+# Telegram 通知的跨轮次累计状态（运行时生成）
+notify_state.json
 env/
 venv/
 ENV/

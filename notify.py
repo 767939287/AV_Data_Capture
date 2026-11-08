@@ -13,6 +13,8 @@
 """
 
 import html
+import json
+import os
 import time
 
 import requests
@@ -21,24 +23,85 @@ import config
 
 _API_URL = 'https://api.telegram.org/bot{token}/sendMessage'
 
+# 状态文件名（与 config.ini 同目录），用于跨轮次累计
+_STATE_FILE = 'notify_state.json'
+
 # 本次运行的统计（由 Movie_Data_Capture 在结束时汇总）
 _stats = {'success': 0, 'failed': 0, 'unknown': 0}
+# 跨轮次累计状态：{started_at, updated_at, success, failed, unknown, rounds}
+_batch = {}
 
 
 def reset():
-    """开始新一次运行前清空统计。"""
+    """只清空本轮计数，不影响跨轮次累计。"""
     for key in _stats:
         _stats[key] = 0
 
 
+def _state_path():
+    """状态文件放在 config.ini 同目录，便于随项目一起迁移。"""
+    try:
+        ini_path = getattr(config.getInstance(), 'ini_path', '') or ''
+        base = os.path.dirname(os.path.abspath(ini_path)) if ini_path else os.getcwd()
+    except Exception:
+        base = os.getcwd()
+    return os.path.join(base, _STATE_FILE)
+
+
+def _load_state():
+    try:
+        with open(_state_path(), 'r', encoding='utf-8') as fp:
+            data = json.load(fp)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_state():
+    try:
+        _batch['updated_at'] = time.time()
+        with open(_state_path(), 'w', encoding='utf-8') as fp:
+            json.dump(_batch, fp, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def begin_run():
+    """开始一次运行。
+
+    清空本轮计数；若上一次运行距现在超过 [telegram] cumulative_reset_hours，
+    则视为新任务、累计从零开始，否则延续上一批继续累加轮次与总数。
+    """
+    reset()
+    state = _load_state()
+    now = time.time()
+    try:
+        reset_hours = config.getInstance().telegram_cumulative_reset_hours()
+    except Exception:
+        reset_hours = 12
+    last = float(state.get('updated_at') or 0)
+    if not state or (reset_hours > 0 and now - last > reset_hours * 3600):
+        state = {'started_at': now, 'updated_at': now,
+                 'success': 0, 'failed': 0, 'unknown': 0, 'rounds': 0}
+    state['rounds'] = int(state.get('rounds') or 0) + 1
+    _batch.clear()
+    _batch.update(state)
+
+
+def _add(key, delta=1):
+    _stats[key] += delta
+    if _batch:
+        _batch[key] = int(_batch.get(key) or 0) + delta
+
+
 def record(success: bool):
     """记录一部影片的处理结果。"""
-    _stats['success' if success else 'failed'] += 1
+    _add('success' if success else 'failed')
 
 
 def record_unknown():
     """记录一个无法识别番号的文件。"""
-    _stats['unknown'] += 1
+    _add('unknown')
 
 
 def _conf():
@@ -108,18 +171,45 @@ def notify_movie(number, filename, success=True, reason=''):
 
 
 def notify_summary(duration=''):
-    """整批结束后的汇总通知（mode=summary/both 时生效）。"""
+    """整轮结束后的汇总通知（mode=summary/both 时生效）。
+
+    开启 [telegram] cumulative 时，消息同时给出「本轮」与「累计」两行，
+    累计跨轮次保留（超过 cumulative_reset_hours 未再运行则视为新任务）。
+    """
     conf = _conf()
+    round_total = sum(int(_stats[k]) for k in ('success', 'failed', 'unknown'))
+    try:
+        cumulative = bool(_batch) and config.getInstance().telegram_cumulative()
+    except Exception:
+        cumulative = False
+
     if not conf['enabled'] or conf['mode'] not in ('summary', 'both'):
+        # 即使本轮不发送，也把累计落盘，避免中途关闭开关丢进度
+        if cumulative:
+            _save_state()
         return False
 
-    total = _stats['success'] + _stats['failed'] + _stats['unknown']
-    lines = ['📊 <b>刮削完成</b>',
-             f"成功：{_stats['success']}",
-             f"失败：{_stats['failed']}",
-             f"未识别：{_stats['unknown']}",
-             f"合计：{total}"]
+    lines = ['📊 <b>刮削完成</b>']
+    if cumulative:
+        rounds = int(_batch.get('rounds') or 1)
+        batch_total = sum(int(_batch.get(k) or 0) for k in ('success', 'failed', 'unknown'))
+        lines = [f'📊 <b>刮削完成</b>（第 {rounds} 轮）',
+                 f"本轮：成功 {_stats['success']} / 失败 {_stats['failed']} / 未识别 {_stats['unknown']} / 合计 {round_total}",
+                 f"累计：成功 {_batch.get('success', 0)} / 失败 {_batch.get('failed', 0)} / "
+                 f"未识别 {_batch.get('unknown', 0)} / 合计 {batch_total}"]
+        started = _batch.get('started_at')
+        if started:
+            lines.append(f"开始：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(float(started)))}")
+    else:
+        lines += [f"成功：{_stats['success']}",
+                  f"失败：{_stats['failed']}",
+                  f"未识别：{_stats['unknown']}",
+                  f"合计：{round_total}"]
+
     if duration:
         lines.append(f"耗时：{html.escape(duration)}")
     lines.append(time.strftime('%Y-%m-%d %H:%M:%S'))
-    return _send('\n'.join(lines))
+    ok = _send('\n'.join(lines))
+    if cumulative:
+        _save_state()
+    return ok

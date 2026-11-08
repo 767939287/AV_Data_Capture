@@ -754,7 +754,8 @@ def main(args: tuple) -> Path:
     print('[*]======================================================')
 
     start_time = time.time()
-    notify.reset()
+    # 清空本轮计数，并按需延续上次的累计（跨轮次汇总）
+    notify.begin_run()
     print('[+]Start at', time.strftime("%Y-%m-%d %H:%M:%S"))
 
     print(f"[+]Load Config file '{conf.ini_path}'.")

@@ -546,6 +546,20 @@ class Config:
         except Exception:
             return ''
 
+    def telegram_cumulative(self) -> bool:
+        """汇总消息是否同时显示跨轮次累计。"""
+        try:
+            return self.conf.getboolean('telegram', 'cumulative', fallback=True)
+        except Exception:
+            return True
+
+    def telegram_cumulative_reset_hours(self) -> float:
+        """超过该小时数未再运行，则视为新任务、累计清零；0=永不自动清零。"""
+        try:
+            return float(self.conf.get('telegram', 'cumulative_reset_hours', fallback='12') or 12)
+        except Exception:
+            return 12.0
+
     def media_type(self) -> str:
         return self.conf.get('media', 'media_type')
 
@@ -1139,6 +1153,8 @@ class Config:
         conf.set(sec21, "mode", "summary")
         conf.set(sec21, "notify_failed", "1")
         conf.set(sec21, "proxy", "")
+        conf.set(sec21, "cumulative", "1")
+        conf.set(sec21, "cumulative_reset_hours", "12")
 
         return conf
 
