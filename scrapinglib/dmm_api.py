@@ -287,6 +287,134 @@ def _to_dict(item: dict, fallback_number: str) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# GraphQL 兜底
+# ---------------------------------------------------------------------------
+# Affiliate API 需要有效的 api_id/affiliate_id，且部分网络下不可达；新版前台
+# （video.dmm.co.jp）已改为 SPA，元数据改由同源 GraphQL 提供，这里作为兜底。
+DMM_GRAPHQL_URL = "https://api.video.dmm.co.jp/graphql"
+DMM_GRAPHQL_QUERY = (
+    "query FetchDigitalContent($id: ID!) {"
+    " ppvContent(id: $id) {"
+    "  title description deliveryStartDate duration"
+    "  actresses { name } directors { name } series { name } maker { name }"
+    "  label { name } genres { name }"
+    "  packageImage { largeUrl mediumUrl }"
+    "  sampleImages { imageUrl largeImageUrl }"
+    "  sample2DMovie { highestMovieUrl }"
+    " }"
+    " reviewSummary(contentId: $id) { average }"
+    "}"
+)
+
+
+def _dedupe_s(values):
+    """去重保序。"""
+    seen = set()
+    result = []
+    for value in values:
+        if value and value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
+
+
+def _graphql_cid_candidates(number: str):
+    """由番号推导 cid 候选：优先用 dmm_prefix 前缀表，再补「无横杠 / 补零」形态。"""
+    normalized = re.sub(r"[^0-9a-zA-Z_]", "", (number or "")).lower()
+    if not normalized:
+        return []
+    if normalized.startswith("h-"):
+        normalized = normalized.replace("h-", "h_", 1)
+    candidates = []
+    try:
+        from .dmm_prefix import cid_candidates
+        candidates.extend(cid_candidates(normalized))
+    except Exception:
+        pass
+    candidates.append(normalized)
+    matched = re.match(r"^([a-z]+)(\d+)$", normalized)
+    if matched:
+        candidates.append(f"{matched.group(1)}{int(matched.group(2)):05d}")
+    return _dedupe_s(candidates)
+
+
+def graphql_fetch(cid: str, proxies=None, verify=None):
+    """按 cid 查询单部作品（含评分）；不存在或失败返回 None。"""
+    payload = {
+        "operationName": "FetchDigitalContent",
+        "variables": {"id": cid},
+        "query": DMM_GRAPHQL_QUERY,
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "Origin": "https://video.dmm.co.jp",
+        "Referer": "https://video.dmm.co.jp/",
+    }
+    try:
+        resp = httprequest.post(DMM_GRAPHQL_URL, data=json.dumps(payload),
+                                extra_headers=headers, proxies=proxies, verify=verify,
+                                return_type="object", retry=1, timeout=20)
+        data = json.loads(resp.text if hasattr(resp, "text") else resp)
+    except Exception:
+        return None
+    body = (data or {}).get("data") or {}
+    content = body.get("ppvContent")
+    if not isinstance(content, dict) or not content.get("title"):
+        return None
+    review = body.get("reviewSummary") or {}
+    if isinstance(review.get("average"), (int, float)):
+        content["_score"] = review["average"]
+    return content
+
+
+def _graphql_to_dict(number: str, cid: str, content: dict) -> dict:
+    """GraphQL ppvContent → 项目统一字段（与 _to_dict 的输出结构一致）。"""
+    package = content.get("packageImage") or {}
+    samples = []
+    for image in content.get("sampleImages") or []:
+        url = image.get("largeImageUrl") or image.get("imageUrl")
+        if url:
+            samples.append(url)
+    runtime = content.get("duration")
+    release = (content.get("deliveryStartDate") or "")[:10]
+    description = re.sub(r"<[^>]+>", "", content.get("description") or "").strip()
+    directors = [d.get("name") for d in content.get("directors") or [] if d.get("name")]
+    return {
+        "number": number,
+        "title": content.get("title") or "",
+        "studio": (content.get("maker") or {}).get("name") or "",
+        "release": release,
+        "outline": description,
+        "runtime": str(int(runtime) // 60) if isinstance(runtime, (int, float)) and runtime else "",
+        "director": directors[0] if directors else "",
+        "actor": [a.get("name") for a in content.get("actresses") or [] if a.get("name")],
+        "actor_photo": {},
+        "cover": package.get("largeUrl") or "",
+        "cover_small": package.get("mediumUrl") or "",
+        "extrafanart": samples,
+        "trailer": (content.get("sample2DMovie") or {}).get("highestMovieUrl") or "",
+        "tag": [g.get("name") for g in content.get("genres") or [] if g.get("name")],
+        "label": (content.get("label") or {}).get("name") or "",
+        "series": (content.get("series") or {}).get("name") or "",
+        "userrating": content.get("_score") or "",
+        "uservotes": "",
+        "uncensored": False,
+        "website": f"https://video.dmm.co.jp/av/content/?id={cid}",
+        "source": "fanza",
+        "imagecut": 1,
+    }
+
+
+def graphql_search(number: str, proxies=None, verify=None):
+    """用 GraphQL 按番号取元数据，返回 dictformat 结构的 dict；失败返回 None。"""
+    for cid in _graphql_cid_candidates(number):
+        content = graphql_fetch(cid, proxies=proxies, verify=verify)
+        if content:
+            return _graphql_to_dict(number, cid, content)
+    return None
+
+
 def search_by_number(number: str, proxies=None, verify=None):
     """用 DMM 官方 API 按番号检索，返回 dictformat 结构的 dict；失败返回 None。
 
@@ -334,4 +462,5 @@ def search_by_number(number: str, proxies=None, verify=None):
         if not data.get("title") and not data.get("cover"):
             continue
         return data
-    return None
+    # Affiliate API 不可用（凭据失效 / 地域限制 / 无匹配）时回退 GraphQL
+    return graphql_search(number, proxies=proxies, verify=verify)

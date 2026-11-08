@@ -84,6 +84,8 @@ celerybeat-schedule
 # Environments
 .env
 .venv
+# Python 3.12 升级时保留的旧环境备份，不要提交
+.venv310/
 env/
 venv/
 ENV/

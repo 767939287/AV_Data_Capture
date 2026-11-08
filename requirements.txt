@@ -5,7 +5,11 @@ numpy
 face-recognition-models
 lxml
 beautifulsoup4
-pillow==9.5.0
+# Pillow 9.x 没有 Python 3.12 的预编译轮子，且 9.5 已停止维护
+pillow>=10.4.0
+# Python 3.12 的 venv 默认不再自带 setuptools；face_recognition_models 依赖
+# pkg_resources，而 setuptools 81+ 已移除该模块，故必须限制在 80.x
+setuptools<81
 cloudscraper
 pysocks==1.7.1
 urllib3==1.26.5

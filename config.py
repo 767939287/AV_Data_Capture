@@ -999,7 +999,7 @@ class Config:
 
         sec6 = "priority"
         conf.add_section(sec6)
-        conf.set(sec6, "website", "airav,javbus,javdb,fanza,xcity,mgstage,fc2,fc2club,avsox,jav321,xcity")
+        conf.set(sec6, "website", "airav,javbus,javdb,fanza,xcity,mgstage,fc2,fc2club,avsox,jav321,freejavbt,iqqtv,avbase,dahlia,faleno,kin8,giga")
         conf.set(sec6, "dmm_image", "0")
         conf.set(sec6, "dmm_image_debug", "0")
         conf.set(sec6, "tag_source", "")
@@ -1054,9 +1054,9 @@ class Config:
         sec15 = "storyline"
         conf.add_section(sec15)
         conf.set(sec15, "switch", "1")
-        conf.set(sec15, "site", "fanza,avno1,airavwiki")
-        conf.set(sec15, "censored_site", "fanza,airav,xcity")
-        conf.set(sec15, "uncensored_site", "58avgo")
+        conf.set(sec15, "site", "fanza,avbase,mgstage,airav,iqqtv,avsox")
+        conf.set(sec15, "censored_site", "fanza,avbase,mgstage,airav,xcity,iqqtv,avsox")
+        conf.set(sec15, "uncensored_site", "avsox,airav")
         conf.set(sec15, "prefer_jp", "1")
         conf.set(sec15, "both_langs", "0")
         conf.set(sec15, "both_langs_sep", "\\n")

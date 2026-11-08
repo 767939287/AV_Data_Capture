@@ -43,13 +43,18 @@ class Javbus(Parser):
     expr_series2 = '//span[contains(text(),"シリーズ:")]/../a/text()'
     expr_label = '//span[contains(text(),"系列:")]/../a/text()'
     expr_cover = '//a[@class="bigImage"]/@href'
-    expr_release = '/html/body/div[5]/div[1]/div[2]/p[2]/text()'
-    expr_runtime = '/html/body/div[5]/div[1]/div[2]/p[3]/text()'
+    # 详情页字段按 header 文案定位，避免依赖容易变化的层级路径
+    expr_release = '//span[@class="header"][contains(text(),"發行日期:")]/parent::p/text()'
+    expr_runtime = '//span[@class="header"][contains(text(),"長度:")]/parent::p/text()'
     expr_actor = '//div[@class="star-name"]/a'
     expr_actorphoto = '//div[@class="star-name"]/../a/img'
     expr_extrafanart = '//div[@id="sample-waterfall"]/a/@href'
     expr_tags = '/html/head/meta[@name="keywords"]/@content'
     expr_uncensored = '//*[@id="navbar"]/ul[1]/li[@class="active"]/a[contains(@href,"uncensored")]'
+
+    def extraInit(self):
+        # javbus 对不带 dv 标记的请求返回年龄验证页，携带 dv=1 才会给出详情页
+        self.cookies = {'dv': '1', 'existmag': 'all'}
 
     def search(self, number):
         self.number = number

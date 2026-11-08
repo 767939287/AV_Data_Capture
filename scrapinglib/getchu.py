@@ -47,12 +47,13 @@ class wwwGetchu(Parser):
         self.allow_number_change = True
 
         self.cookies = {'getchu_adalt_flag': 'getchu.com', "adult_check_flag": "1"}
-        self.GETCHU_WWW_SEARCH_URL = 'http://www.getchu.com/php/search.phtml?genre=anime_dvd&search_keyword=_WORD_&check_key_dtl=1&submit='
+        self.GETCHU_WWW_SEARCH_URL = 'https://www.getchu.com/php/search.phtml?genre=anime_dvd&search_keyword=_WORD_&check_key_dtl=1&submit='
 
     def queryNumberUrl(self, number):
         if 'GETCHU' in number.upper():
-            idn = re.findall('\d+',number)[0]
-            return "http://www.getchu.com/soft.phtml?id=" + idn
+            idn = re.findall(r'\d+',number)[0]
+            # 旧的 soft.phtml?id= 已 301 到 /item/<id>/，直接请求新地址避免拿到跳转空页
+            return "https://www.getchu.com/item/" + idn + "/"
         else:
             queryUrl = self.GETCHU_WWW_SEARCH_URL.replace("_WORD_", quote(number, encoding="euc_jp"))
         # NOTE dont know why will try 2 times
@@ -64,7 +65,7 @@ class wwwGetchu(Parser):
                 break
         if detailurl == "":
             return None
-        return detailurl.replace('../', 'http://www.getchu.com/')
+        return detailurl.replace('../', 'https://www.getchu.com/')
 
     def getHtml(self, url, type = None):
         """ 访问网页(指定EUC-JP)
@@ -79,7 +80,7 @@ class wwwGetchu(Parser):
         return resp
 
     def getNum(self, htmltree):
-        return 'GETCHU-' + re.findall('\d+', self.detailurl.replace("http://www.getchu.com/soft.phtml?id=", ""))[0]
+        return 'GETCHU-' + re.findall(r'\d+', self.detailurl)[0]
 
     def getActors(self, htmltree):
         return super().getDirector(htmltree)
@@ -95,13 +96,13 @@ class wwwGetchu(Parser):
         url = super().getCover(htmltree)
         if "getchu.com" in url:
             return url
-        return "http://www.getchu.com" + url
+        return "https://www.getchu.com" + url
 
     def getExtrafanart(self, htmltree):
         arts = super().getExtrafanart(htmltree)
         extrafanart = []
         for i in arts:
-            i = "http://www.getchu.com" + i.replace("./", '/')
+            i = "https://www.getchu.com" + i.replace("./", '/')
             if 'jpg' in i:
                 extrafanart.append(i)
         return extrafanart
@@ -145,18 +146,18 @@ class dlGetchu(wwwGetchu):
 
     def queryNumberUrl(self, number):
         if "item" in number or 'GETCHU' in number.upper():
-            self.number = re.findall('\d+',number)[0]
+            self.number = re.findall(r'\d+',number)[0]
         else:
             queryUrl = self.GETCHU_DL_SEARCH_URL.replace("_WORD_", quote(number, encoding="euc_jp"))
             queryTree = self.getHtmlTree(queryUrl)
             detailurl = self.getTreeElement(queryTree, '/html/body/div[1]/table/tr/td/table[4]/tr/td[2]/table/tr[2]/td/table/tr/td/table/tr/td[2]/div/a[1]/@href')
             if detailurl == "":
                 return None
-            self.number = re.findall('\d+', detailurl)[0]
+            self.number = re.findall(r'\d+', detailurl)[0]
         return self.GETCHU_DL_URL.replace("_WORD_", self.number)    
 
     def getNum(self, htmltree):
-        return 'GETCHU-' + re.findall('\d+', self.number)[0]
+        return 'GETCHU-' + re.findall(r'\d+', self.number)[0]
 
     def extradict(self, dic: dict):
         return dic

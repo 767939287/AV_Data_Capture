@@ -12,15 +12,17 @@ from .parser import Parser
 class Javdb(Parser):
     source = 'javdb'
 
-    expr_number = '//strong[contains(text(),"番號")]/../span/text()'
-    expr_number2 = '//strong[contains(text(),"番號")]/../span/a/text()'
+    # 新版详情页把番号放在「复制」按钮的 data 属性上；保留旧版文本节点作为兜底
+    expr_number = '//a[contains(@class,"copy-to-clipboard")]/@data-clipboard-text'
+    expr_number2 = '//strong[contains(text(),"番號")]/../span/text()'
     expr_title = "/html/head/title/text()"
     expr_title_no = '//*[contains(@class,"movie-list")]/div/a/div[contains(@class, "video-title")]/strong/text()'
     expr_runtime = '//strong[contains(text(),"時長")]/../span/text()'
     expr_runtime2 = '//strong[contains(text(),"時長")]/../span/a/text()'
     expr_uncensored = '//strong[contains(text(),"類別")]/../span/a[contains(@href,"/tags/uncensored?") or contains(@href,"/tags/western?")]'
     expr_actor = '//span[@class="value"]/a[contains(@href,"/actors/")]/text()'
-    expr_actor2 = '//span[@class="value"]/a[contains(@href,"/actors/")]/../strong/@class'
+    # 女优链接带 actor-female，男优为普通 a（旧版则用 strong 的 symbol 图标）
+    expr_actor2 = '//span[@class="value"]/a[contains(@href,"/actors/")]/@class'
     expr_release = '//strong[contains(text(),"日期")]/../span/text()'
     expr_release_no = '//*[contains(@class,"movie-list")]/div/a/div[contains(@class, "meta")]/text()'
     expr_studio = '//strong[contains(text(),"片商")]/../span/a/text()'
@@ -52,6 +54,11 @@ class Javdb(Parser):
     def updateCore(self, core):
         # 保存 core 引用，供 api/app 通道在分派时重新初始化子通道使用
         self._core = core
+        # 直接调用 scrape(number, None) 时没有 core，使用默认 cookie/站点即可
+        if core is None:
+            self.cookies = {'over18': '1', 'theme': 'auto', 'locale': 'zh'}
+            self.dbsite = 'javdb'
+            return
         if core.proxies:
             self.proxies = core.proxies
         if core.verify:
@@ -194,41 +201,30 @@ class Javdb(Parser):
         #         if ids[0].upper() != number.upper():
         #             raise ValueError("number not found in javdb")
             self.querytree = etree.fromstring(resp.text, etree.HTMLParser()) 
-            
-            # 获取所有可能的URL和ID，添加长度检查和日志
-            urls = self.getTreeAll(self.querytree, '//*[contains(@class,"movie-list")]/div/a/@href')
-            if not urls:
+
+            # 搜索结果条目：新版为 <a class="box">，旧版为 div.movie-list > div > a，两种都收
+            candidates = self._search_candidates(self.querytree, resp.url)
+            if not candidates:
                 print(f'[!] {self.number}: No search results found in javdb')
                 raise Exception(f'[!] {self.number}: No search results found in javdb')
-            
-            # 欧美影片的特殊处理
+
+            urls = [url for url, _ in candidates]
+            ids = [found for _, found in candidates]
+            print(f'[+] {self.number}: Found {len(ids)} results: {ids}')
+
+            # 欧美影片（形如 blacked.20.01.01）直接取第一条
             if re.search(r'[a-zA-Z]+\.\d{2}\.\d{2}\.\d{2}', number):
-                print(f'[+] {self.number}: Western video detected')        
-                correct_url = urls[0]
-        # return urljoin(resp.url, correct_url)
-            else:
-                ids = self.getTreeAll(self.querytree, '//*[contains(@class,"movie-list")]/div/a/div[contains(@class, "video-title")]/strong/text()')
-                print(f'[+] {self.number}: Found {len(ids)} results: {ids}')
-                
-                try:
-                    self.queryid = ids.index(number)
-                    correct_url = urls[self.queryid]
-                except ValueError:
-                    # 检查第一个结果是否匹配
-                    if not ids:
-                        print(f'[!] {self.number}: No IDs found in search results')
-                        raise ValueError("No IDs found in javdb search results")
-                        
-                    if ids[0].upper() != number.upper():
-                        print(f'[!] {self.number}: Expected {number}, but found {ids[0]}')
-                        raise ValueError(f"number not found in javdb (found: {ids[0]})")
-                        
-                    correct_url = urls[0]
-                except IndexError as e:
-                    print(f'[!] {self.number}: Index error - urls:{len(urls)}, ids:{len(ids)}')
-                    raise IndexError(f"Index mismatch: urls({len(urls)}), ids({len(ids)})") from e
-                
-            return urljoin(resp.url, correct_url)
+                return urls[0]
+
+            # 只接受与番号严格对应的结果：先精确匹配，再忽略分隔符匹配，避免刮错
+            folded_target = re.sub(r'[-_\s]', '', number).upper()
+            for index, found in enumerate(ids):
+                if found.upper() == number.upper() or \
+                        re.sub(r'[-_\s]', '', found).upper() == folded_target:
+                    self.queryid = index
+                    return urls[index]
+
+            raise ValueError(f"number not found in javdb (found: {ids[0]})")
             
         except Exception as e:
             print(f'[!] {self.number}: Error in queryNumberUrl: {str(e)}')
@@ -236,11 +232,48 @@ class Javdb(Parser):
             print(f'[!] Response URL: {resp.url if "resp" in locals() else "N/A"}')
             raise
             
+    @staticmethod
+    def _search_candidates(querytree, base_url):
+        """从搜索结果页提取 (详情页 URL, 结果番号) 列表。
+
+        新版站点条目为 ``<a class="box">``，番号在 ``div.video-title > strong``；
+        旧版为 ``div.movie-list > div > a``，结构相同。只收两者都有的条目。
+        """
+        candidates = []
+        for item in querytree.xpath('//a[contains(@class,"box")]'):
+            href = ''.join(item.xpath('./@href')).strip()
+            found = ''.join(item.xpath('.//div[contains(@class,"video-title")]/strong/text()')).strip()
+            if href and found:
+                candidates.append((urljoin(base_url, href), found))
+        if candidates:
+            return candidates
+        for item in querytree.xpath('//*[contains(@class,"movie-list")]/div/a'):
+            href = ''.join(item.xpath('./@href')).strip()
+            found = ''.join(item.xpath('.//div[contains(@class,"video-title")]/strong/text()')).strip()
+            if href and found:
+                candidates.append((urljoin(base_url, href), found))
+        return candidates
+
+    def getNum(self, htmltree):
+        """番号优先取复制按钮的 data 属性，旧版页面回退到 info 面板文本。"""
+        number = self.getTreeElement(htmltree, self.expr_number).strip()
+        if not number:
+            number = self.getTreeElement(htmltree, self.expr_number2).strip()
+        return number
+
     def getTitle(self, htmltree):
         if self.noauth:
             return self.getTreeElement(htmltree, self.expr_title_no, self.queryid)
-        browser_title = super().getTitle(htmltree)
-        title = browser_title[:browser_title.find(' | JavDB')].strip()
+        # 新版：h2.title > strong.current-title 为显示标题，span.origin-title 为原标题
+        title = self.getTreeElement(
+            htmltree, '//h2[contains(@class,"title")]/strong[contains(@class,"current-title")]/text()').strip()
+        if not title:
+            title = self.getTreeElement(
+                htmltree, '//h2[contains(@class,"title")]/span[contains(@class,"origin-title")]/text()').strip()
+        if not title:
+            browser_title = super().getTitle(htmltree)
+            end = browser_title.find(' | JavDB')
+            title = (browser_title[:end] if end > 0 else browser_title).strip()
         return title.replace(self.number, '').strip()
 
     def getCover(self, htmltree):
@@ -275,16 +308,18 @@ class Javdb(Parser):
         actors = self.getTreeAll(htmltree, self.expr_actor)
         genders = self.getTreeAll(htmltree, self.expr_actor2)
         r = []
-        idx = 0
         # NOTE only female, we dont care others
         actor_gendor = 'female'
-        for act in actors:
-            if((actor_gendor == 'all')
-            or (actor_gendor == 'both' and genders[idx] in ['symbol female', 'symbol male'])
-            or (actor_gendor == 'female' and genders[idx] == 'symbol female')
-            or (actor_gendor == 'male' and genders[idx] == 'symbol male')):
+        for idx, act in enumerate(actors):
+            # 新版用 actor-female class 标记女优；旧版用 strong 的 symbol 图标
+            gender = genders[idx] if idx < len(genders) else ''
+            is_female = 'actor-female' in gender or gender == 'symbol female'
+            is_male = 'actor-male' in gender or gender == 'symbol male'
+            if (actor_gendor == 'all'
+                    or (actor_gendor == 'both' and (is_female or is_male))
+                    or (actor_gendor == 'female' and is_female)
+                    or (actor_gendor == 'male' and is_male)):
                 r.append(act)
-            idx = idx + 1
         if re.match(r'FC2-[\d]+', self.number, re.A) and not r:
             r = '素人'
             self.fixstudio = True

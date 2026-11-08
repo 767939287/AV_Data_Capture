@@ -2,50 +2,143 @@
 
 import json
 import re
+from urllib.parse import quote, urljoin
+
+from lxml import etree
+
 from .parser import Parser
-from .javbus import Javbus
+
+# 站内部分来源把来源名写在番号前（caribbeancom_051318-665），比对前先剥除
+_SOURCE_LABELS = ('caribbeancom', '1pondo', '10musume', 'pacopacomama')
+
+
+def fold_number(value):
+    """忽略大小写与分隔符的番号形态，用于宽松比对。"""
+    return re.sub(r'[^0-9a-z]', '', (value or '').casefold())
 
 
 class Airav(Parser):
-    source = 'airav'
+    """AIRAV 刮削器（airav.io）。
 
-    expr_title = '/html/head/title/text()'
-    expr_number = '/html/head/title/text()'
-    expr_studio = '//a[contains(@href,"?video_factory=")]/text()'
-    expr_release = '//li[contains(text(),"發片日期")]/text()'
-    expr_outline = "string(//div[@class='d-flex videoDataBlock']/div[@class='synopsis']/p)"
-    expr_actor = '//ul[@class="videoAvstarList"]/li/a[starts-with(@href,"/idol/")]/text()'
-    expr_cover = '//img[contains(@src,"/storage/big_pic/")]/@src'
-    expr_tags = '//div[@class="tagBtnMargin"]/a/text()'
-    expr_extrafanart = '//div[@class="mobileImgThumbnail"]/a/@href'
+    旧版 www.airav.wiki 的 JSON API 已下线，新版为服务端渲染 HTML：
+    搜索页 ``/search_result?kw=`` 中每部影片是一个 ``div.oneVideo``；详情页
+    ``/video?hid=`` 的番号/女优/标签在 ``ul.list-group`` 里，简介在
+    ``div.video-info > p``，发行日期位于时钟图标旁。
+    """
+
+    source = 'airav'
+    base_url = 'https://airav.io'
 
     def extraInit(self):
-        # for javbus
-        self.specifiedSource = None
-        self.addtion_Javbus = True
+        self.imagecut = 1
+        self.originalnum = ''
 
     def search(self, number):
         self.number = number
         if self.specifiedUrl:
-            self.detailurl = self.specifiedUrl
+            return self._scrape(self.specifiedUrl)
+        # 站内 FC2 恒写 FC2-PPV-<id>，优先用它检索，未命中再按原样检索
+        terms = [number]
+        article_id = re.sub(r'(?i)^(?:fc2-?ppv-?|fc2-?)', '', number).strip('-')
+        if article_id.isdigit():
+            terms.insert(0, f'FC2-PPV-{article_id}')
+        for term in dict.fromkeys(terms):
+            url = self._search_term(term, number)
+            if url:
+                return self._scrape(url)
+        return 404
+
+    def _search_term(self, term, number):
+        """检索单个写法，返回与番号严格对应的详情页地址（不取首条）。"""
+        html = self.getHtml(f'{self.base_url}/search_result?kw={quote(term)}')
+        if html == 404:
+            return None
+        tree = etree.fromstring(html, etree.HTMLParser())
+        target = fold_number(number)
+        for item in tree.xpath('//div[contains(@class,"oneVideo")]'):
+            href = ''.join(item.xpath('.//a/@href')).strip()
+            title = ''.join(item.xpath('.//h5//text()')).strip()
+            if not href or not title:
+                continue
+            token = self._strip_source_label(title.split(' ')[0])
+            if fold_number(token) == target:
+                return urljoin(self.base_url, href)
+        return None
+
+    def _scrape(self, url):
+        html = self.getHtml(url)
+        if html == 404:
+            return 404
+        tree = etree.fromstring(html, etree.HTMLParser())
+
+        number = self.getTreeElement(tree, '//li[contains(text(),"番")]/span/text()').strip()
+        heading = self.getTreeElement(tree, '//div[contains(@class,"video-title")]//h1/text()').strip()
+        if not number or not heading:
+            return 404
+
+        token = heading.split(' ')[0]
+        if fold_number(self._strip_source_label(token)) == fold_number(number):
+            title = heading[len(token):].strip()
         else:
-            self.detailurl = "https://www.airav.wiki/api/video/barcode/" + self.number.upper() + "?lng=zh-TW"
-        if self.addtion_Javbus:
-            engine = Javbus()
-            javbusinfo = engine.scrape(self.number, self)
-            if javbusinfo == 404:
-                self.javbus = {"title": ""}
-            else:
-                self.javbus = json.loads(javbusinfo)
-        self.htmlcode = self.get_by_scraper(self.detailurl)
-        # print("Search result: " + self.htmlcode)
-        if "</html>" in self.htmlcode: 
-            self.htmlcode = self.htmlcode.split("</html>")[1]
-        # htmltree = etree.fromstring(self.htmlcode, etree.HTMLParser())
-        # result = self.dictformat(htmltree)
-        htmltree = json.loads(self.htmlcode)["result"]
-        result = self.dictformat(htmltree)
-        return result
+            title = heading
+
+        cover = self.getTreeElement(tree, '//meta[@property="og:image"]/@content').strip()
+        if cover and not cover.startswith('http'):
+            cover = urljoin(self.base_url, cover)
+
+        release = ''.join(
+            tree.xpath('//div[contains(@class,"video-item")]//i[contains(@class,"fa-clock")]/parent::*/text()')
+        ).strip()
+        matched = re.search(r'\d{4}-\d{2}-\d{2}', release)
+        release = matched.group(0) if matched else ''
+
+        actors = [x.strip() for x in tree.xpath('//a[contains(@href,"actor?id=")]/text()') if x.strip()]
+        studio = self.getTreeElement(tree, '//a[contains(@href,"tag?id=")]/text()').strip()
+        tags = [x.strip() for x in tree.xpath('//a[contains(@href,"tag?tid=")]/text()') if x.strip()]
+        outline = self.getTreeElement(tree, '//div[contains(@class,"video-info")]/p/text()').strip()
+
+        dic = {
+            'number': number,
+            'title': title,
+            'studio': studio,
+            'release': release,
+            'year': release[:4] if release else '',
+            'outline': outline,
+            'runtime': '',
+            'director': '',
+            'actor': actors,
+            'actor_photo': {},
+            'cover': cover,
+            'cover_small': '',
+            'extrafanart': [],
+            'trailer': '',
+            'tag': tags,
+            'label': '',
+            'series': '',
+            'userrating': '',
+            'uservotes': '',
+            'uncensored': False,
+            'website': url,
+            'source': self.source,
+            'imagecut': self.imagecut,
+        }
+        return json.dumps(dic, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+
+    @staticmethod
+    def _strip_source_label(value):
+        """剥除站内来源名前缀，如 ``caribbeancom_051318-665`` → ``051318-665``。"""
+        folded = (value or '').casefold()
+        for label in _SOURCE_LABELS:
+            if not folded.startswith(label):
+                continue
+            rest = value[len(label):]
+            if rest[:1] in ('_', '-'):
+                rest = rest[1:]
+            elif not rest[:1].isdigit():
+                continue
+            if rest:
+                return rest
+        return value
 
     # def queryNumberUrl(self, number):
     #     queryUrl =  "https://cn.airav.wiki/?search=" + number
@@ -58,119 +151,4 @@ class Airav(Parser):
     #             return "https://cn.airav.wiki" + i.attrib['href']
     #     return 'https://cn.airav.wiki/video/' + number
 
-    def getNum(self, htmltree):
-        # if self.addtion_Javbus:
-        #     result = self.javbus.get('number')
-        #     if isinstance(result, str) and len(result):
-        #         return result
-        # number = super().getNum(htmltree)
-        # result = str(re.findall(r'^\[(.*?)]', number)[0])
-        result = htmltree["barcode"]
-        return result
 
-    def getTitle(self, htmltree):
-        # title = super().getTitle(htmltree)
-        # result = str(re.findall('](.*?)- AIRAV-WIKI', title)[0]).strip()
-        result = htmltree["name"]
-        return result
-
-    def getStudio(self, htmltree):
-        if self.addtion_Javbus:
-            result = self.javbus.get('studio')
-            if isinstance(result, str) and len(result):
-                return result
-        return super().getStudio(htmltree)
-
-    def getRelease(self, htmltree):
-        if self.addtion_Javbus:
-            result = self.javbus.get('release')
-            if isinstance(result, str) and len(result):
-                return result
-        try:
-            return re.search(r'\d{4}-\d{2}-\d{2}', str(super().getRelease(htmltree))).group()
-        except:
-            return ''
-
-    def getYear(self, htmltree):
-        if self.addtion_Javbus:
-            result = self.javbus.get('year')
-            if isinstance(result, str) and len(result):
-                return result
-        release = self.getRelease(htmltree)
-        return str(re.findall(r'\d{4}', release)).strip(" ['']")
-
-    def getOutline(self, htmltree):
-
-        # return self.getTreeAll(htmltree, self.expr_outline).replace('\n','').strip()
-        try:
-            result = htmltree["description"]
-        except:
-            result = ""
-        return result
-
-    def getRuntime(self, htmltree):
-        if self.addtion_Javbus:
-            result = self.javbus.get('runtime')
-            if isinstance(result, str) and len(result):
-                return result
-        return ''
-
-    def getDirector(self, htmltree):
-        if self.addtion_Javbus:
-            result = self.javbus.get('director')
-            if isinstance(result, str) and len(result):
-                return result
-        return ''
-
-    def getActors(self, htmltree):
-        # a = super().getActors(htmltree)
-        # b = [ i.strip() for i in a if len(i)]
-        # if len(b):
-        #     return b
-        # if self.addtion_Javbus:
-        #     result = self.javbus.get('actor')
-        #     if isinstance(result, list) and len(result):
-        #         return result
-        # return []
-        a = htmltree["actors"]
-        if a:
-            b = []
-            for i in a:
-                b.append(i["name"])
-        else:
-            b = []
-        return b
-
-    def getCover(self, htmltree):
-        # if self.addtion_Javbus:
-        #     result = self.javbus.get('cover')
-        #     if isinstance(result, str) and len(result):
-        #         return result
-        result = htmltree['img_url']
-        if isinstance(result, str) and len(result):
-            return result
-        return super().getCover(htmltree)
-
-    def getSeries(self, htmltree):
-        if self.addtion_Javbus:
-            result = self.javbus.get('series')
-            if isinstance(result, str) and len(result):
-                return result
-        return ''
-
-    def getExtrafanart(self, htmltree):
-        try:
-            result = htmltree["images"]
-        except:
-            result = ""
-        return result
-
-    def getTags(self, htmltree):
-        try:
-            tag = htmltree["tags"]
-            tags = []
-            for i in tag:
-                tags.append(i["name"])
-        except:
-            tags = []
-        return tags

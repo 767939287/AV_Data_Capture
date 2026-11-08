@@ -33,14 +33,14 @@ class Madouji(Parser):
 
     def getRuntime(self, htmltree):
         for info in self.infos:
-            num = re.search('时长：(\w+)', info.text)
+            num = re.search(r'时长：(\w+)', info.text)
             if num:
                 return num.group(1)
         return ''
 
     def getSeries(self, htmltree):
         for info in self.infos:
-            num = re.search('分类：(\w+)', info.text)
+            num = re.search(r'分类：(\w+)', info.text)
             if num:
                 return num.group(1)
         return ''
@@ -85,7 +85,7 @@ class Madouji(Parser):
         title = super().getTitle(htmltree)
         # 删除番号
         try:
-            title = str(re.sub("（.+?）( #\w+)*$", '', title, 1))
+            title = str(re.sub(r"（.+?）( #\w+)*$", '', title, 1))
         except:
             title = title.replace('（'+self.number+'）', '')
         return title.strip()

@@ -10,15 +10,20 @@ from .parser import Parser
 class Fc2(Parser):
     source = 'fc2'
 
-    expr_title = '/html/head/title/text()'
-    expr_studio = '//*[@id="top"]/div[1]/section[1]/div/section/div[2]/ul/li[3]/a/text()'
-    expr_release = '//*[@id="top"]/div[1]/section[1]/div/section/div[2]/div[2]/p/text()'
+    # 标题取主图 alt：标题行里除标题外还有促销角标与隐藏水印
+    expr_title = '//div[@class="items_article_MainitemThumb"]//img/@alt'
+    expr_studio = '//div[@class="items_article_headerInfo"]/ul/li[last()]/a/text()'
+    # 站点按语言返回「販売日」或「Sale Day」
+    expr_release = ('//div[@class="items_article_softDevice"]/p[contains(text(),"販売日")'
+                    ' or contains(text(),"Sale Day")]/text()')
     expr_runtime = "//p[@class='items_article_info']/text()"
-    expr_director = '//*[@id="top"]/div[1]/section[1]/div/section/div[2]/ul/li[3]/a/text()'
-    expr_actor = '//*[@id="top"]/div[1]/section[1]/div/section/div[2]/ul/li[3]/a/text()'
+    expr_director = ''
+    expr_actor = '//div[@class="items_article_headerInfo"]/ul/li[last()]/a/text()'
     expr_cover = "//div[@class='items_article_MainitemThumb']/span/img/@src"
     expr_extrafanart = '//ul[@class="items_article_SampleImagesArea"]/li/a/@href'
     expr_tags = "//a[@class='tag tagTag']/text()"
+    # 商品页独有的块；商品不在售时站点回 200 但页面无此块
+    _ARTICLE_BLOCK = '//div[@data-section="userInfo"]'
 
     def extraInit(self):
         self.imagecut = 0
@@ -36,6 +41,9 @@ class Fc2(Parser):
         if self.htmlcode == 404:
             return 404
         htmltree = etree.HTML(self.htmlcode)
+        # 商品已下架时站点仍返回 200 的「お探しの商品が見つかりませんでした」页，按无此番号处理
+        if not htmltree.xpath(self._ARTICLE_BLOCK):
+            return 404
         result = self.dictformat(htmltree)
         return result
 
@@ -43,8 +51,10 @@ class Fc2(Parser):
         return 'FC2-' + self.number
 
     def getRelease(self, htmltree):
-        return super().getRelease(htmltree).strip(" ['販売日 : ']").replace('/','-')
-    
+        text = self.getTreeElement(htmltree, self.expr_release).strip()
+        matched = re.search(r'(\d{4})/(\d{1,2})/(\d{1,2})', text)
+        return f'{matched.group(1)}-{int(matched.group(2)):02d}-{int(matched.group(3)):02d}' if matched else ''
+
     def getActors(self, htmltree):
         actors = super().getActors(htmltree)
         if not actors:
@@ -52,7 +62,13 @@ class Fc2(Parser):
         return actors
 
     def getCover(self, htmltree):
-        return urljoin('https://adult.contents.fc2.com', super().getCover(htmltree)) 
+        cover = super().getCover(htmltree).strip()
+        if not cover:
+            return ''
+        return urljoin('https://adult.contents.fc2.com', cover)
+
+    def getOutline(self, htmltree):
+        return self.getTreeElement(htmltree, '//meta[@name="description"]/@content').strip()
 
     def getTrailer(self, htmltree):
         video_pather = re.compile(r'\'[a-zA-Z0-9]{32}\'')

@@ -29,7 +29,7 @@ def get_xpath_single(html_code: str, xpath):
     return result1
 
 
-G_USER_AGENT = r'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+G_USER_AGENT = r'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
 
 
 #def get_html(url, cookies: dict = None, ua: str = None, return_type: str = None, encoding: str = None, json_headers=None, cookie_arg=None,user_agent=None):
@@ -332,7 +332,7 @@ def translate(
         return src
     if engine == "google-free":
         gsite = config.getInstance().get_translate_service_site()
-        if not re.match('^translate\.google\.(com|com\.\w{2}|\w{2})$', gsite):
+        if not re.match(r'^translate\.google\.(com|com\.\w{2}|\w{2})$', gsite):
             gsite = 'translate.google.cn'
         url = (
             f"https://{gsite}/translate_a/single?client=gtx&dt=t&dj=1&ie=UTF-8&sl=auto&tl={target_language}&q={src}"

@@ -315,7 +315,15 @@ def get_dmm_cid_ex(number: str, proxies=None, verify=None):
     normalized = _normalize_number(number)
     if not normalized:
         return "", "番号为空或无法规整"
-    # DMM 搜索对 00 补零/无补零两种形态都有结果，这里两种都试
+    # 新版前台是 SPA，搜索页已不再稳定携带 cid；优先用 GraphQL 确认 cid
+    try:
+        from .dmm_api import graphql_fetch
+        for cid in _cid_candidates_from_number(normalized):
+            if graphql_fetch(cid, proxies=proxies, verify=verify):
+                return cid, ""
+    except Exception:
+        pass
+    # 回退：DMM 搜索对 00 补零/无补零两种形态都有结果，这里两种都试
     search_numbers = [normalized]
     if re.match(r"^[a-z]+\d+$", normalized):
         m = re.match(r"^([a-z]+)(\d+)$", normalized)

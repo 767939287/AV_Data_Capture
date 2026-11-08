@@ -40,7 +40,8 @@ class Scraping:
     """
     adult_full_sources = ['javlibrary', 'javdb', 'javbus', 'airav', 'fanza', 'xcity', 'jav321',
                           'mgstage', 'fc2', 'avsox', 'dlsite', 'carib', 'madou', 'msin',
-                          'getchu', 'gcolle', 'javday', 'pissplay', 'javmenu', 'pcolle', 'caribpr','madouji'
+                          'getchu', 'gcolle', 'javday', 'pissplay', 'javmenu', 'pcolle', 'caribpr','madouji',
+                          'freejavbt', 'iqqtv', 'avbase', 'dahlia', 'faleno', 'kin8', 'giga'
                           ]
 
     general_full_sources = ['tmdb', 'imdb']

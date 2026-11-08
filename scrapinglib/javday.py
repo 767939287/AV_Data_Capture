@@ -43,8 +43,8 @@ class Javday(Parser):
         title = super().getTitle(htmltree)
         # 删除番号和网站名
         try:
-            title = str(re.sub("^[\w\-]+",'',title,1))
-            title = str(re.sub("[\w\.\-]+$",'',title,1))
+            title = str(re.sub(r"^[\w\-]+",'',title,1))
+            title = str(re.sub(r"[\w\.\-]+$",'',title,1))
         except:
             print("非标准标题" + title)
             title = title.replace(self.number,"")

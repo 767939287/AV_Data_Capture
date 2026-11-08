@@ -6,7 +6,25 @@ import json
 import inspect
 from lxml import etree
 from urllib.parse import urlencode
+from . import httprequest
 from .parser import Parser
+
+# DMM/FANZA 新前台（video.dmm.co.jp）是 SPA，HTML 里没有影片数据，元数据改由 GraphQL 提供。
+# 该接口对部分地区开放，直连会命中地域限制，需由调用方配置代理。
+DMM_GRAPHQL_URL = 'https://api.video.dmm.co.jp/graphql'
+DMM_DIGITAL_QUERY = (
+    'query FetchDigitalContent($id: ID!) {'
+    ' ppvContent(id: $id) {'
+    '  title description deliveryStartDate duration'
+    '  actresses { name } directors { name } series { name } maker { name }'
+    '  label { name } genres { name }'
+    '  packageImage { largeUrl mediumUrl }'
+    '  sampleImages { imageUrl largeImageUrl }'
+    '  sample2DMovie { highestMovieUrl }'
+    ' }'
+    ' reviewSummary(contentId: $id) { average }'
+    '}'
+)
 
 
 class Fanza(Parser):
@@ -40,10 +58,16 @@ class Fanza(Parser):
             return result
 
         # 1) 优先走 DMM 官方 Affiliate API（稳定、结构化；FANZA 即 DMM 成人品牌，内容同源）。
-        #    失败（无凭据/无匹配/网络异常）时回退到下面的详情页爬取。
+        #    失败（无凭据/无匹配/网络异常）时回退到详情页爬取。
         api_result = self._search_by_api(number)
         if api_result is not None:
             return api_result
+
+        # 2) 新版前台是 SPA，HTML 无数据；用 GraphQL 取结构化元数据（需要代理绕过地域限制）。
+        #    失败时继续走旧版详情页兜底。
+        graphql_result = self._search_by_graphql(number)
+        if graphql_result is not None:
+            return graphql_result
 
         # fanza allow letter + number + underscore, normalize the input here
         # @note: I only find the usage of underscore as h_test123456789
@@ -134,6 +158,93 @@ class Fanza(Parser):
                               separators=(',', ':'))
         except Exception:
             return None
+
+    def _search_by_graphql(self, number):
+        """走 video.dmm.co.jp 的 GraphQL 取元数据，返回 JSON 字符串；无匹配返回 None。
+
+        HTML 前台（/digital/videoa/-/detail/）已 301 到 SPA，旧解析拿不到数据；
+        GraphQL 字段与页面一致，且不受前端改版影响。地域限制站点需配置代理。
+        """
+        search_number = re.sub(r'[^0-9a-zA-Z_]', '', number).lower()
+        if search_number.startswith('h-'):
+            search_number = search_number.replace('h-', 'h_', 1)
+        for cid in self._cid_candidates(search_number):
+            content = self._fetch_graphql(cid)
+            if not content:
+                continue
+            mapped = self._graphql_to_dict(number, cid, content)
+            if mapped:
+                return mapped
+        return None
+
+    def _fetch_graphql(self, cid):
+        """按 cid 查询单个作品，返回 ppvContent 字典（含评分）；失败返回 None。"""
+        payload = {
+            'operationName': 'FetchDigitalContent',
+            'variables': {'id': cid},
+            'query': DMM_DIGITAL_QUERY,
+        }
+        headers = {
+            'Content-Type': 'application/json',
+            'Origin': 'https://video.dmm.co.jp',
+            'Referer': 'https://video.dmm.co.jp/',
+        }
+        try:
+            resp = httprequest.post(DMM_GRAPHQL_URL, data=json.dumps(payload),
+                                    extra_headers=headers, proxies=self.proxies,
+                                    verify=self.verify, return_type='object',
+                                    retry=1, timeout=20)
+            data = json.loads(resp.text if hasattr(resp, 'text') else resp)
+        except Exception:
+            return None
+        body = (data or {}).get('data') or {}
+        content = body.get('ppvContent')
+        if not isinstance(content, dict) or not content.get('title'):
+            return None
+        review = body.get('reviewSummary') or {}
+        if isinstance(review.get('average'), (int, float)):
+            content['_score'] = review['average']
+        return content
+
+    def _graphql_to_dict(self, number, cid, content):
+        """把 GraphQL 的 ppvContent 映射为本项目的统一字段。"""
+        package = content.get('packageImage') or {}
+        samples = []
+        for image in content.get('sampleImages') or []:
+            url = image.get('largeImageUrl') or image.get('imageUrl')
+            if url:
+                samples.append(url)
+        runtime = content.get('duration')
+        release = (content.get('deliveryStartDate') or '')[:10]
+        description = re.sub(r'<[^>]+>', '', content.get('description') or '').strip()
+        directors = [d.get('name') for d in content.get('directors') or [] if d.get('name')]
+        movie = (content.get('sample2DMovie') or {}).get('highestMovieUrl') or ''
+        dic = {
+            'number': number,
+            'title': content.get('title') or '',
+            'studio': (content.get('maker') or {}).get('name') or '',
+            'release': release,
+            'year': release[:4] if release else '',
+            'outline': description,
+            'runtime': str(int(runtime) // 60) if isinstance(runtime, (int, float)) and runtime else '',
+            'director': directors[0] if directors else '',
+            'actor': [a.get('name') for a in content.get('actresses') or [] if a.get('name')],
+            'actor_photo': {},
+            'cover': package.get('largeUrl') or '',
+            'cover_small': package.get('mediumUrl') or '',
+            'extrafanart': samples,
+            'trailer': movie,
+            'tag': [g.get('name') for g in content.get('genres') or [] if g.get('name')],
+            'label': (content.get('label') or {}).get('name') or '',
+            'series': (content.get('series') or {}).get('name') or '',
+            'userrating': content.get('_score') or '',
+            'uservotes': '',
+            'uncensored': False,
+            'website': f'https://video.dmm.co.jp/av/content/?id={cid}',
+            'source': self.source,
+            'imagecut': self.imagecut,
+        }
+        return json.dumps(dic, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
 
     @staticmethod
     def _cid_candidates(fanza_search_number):

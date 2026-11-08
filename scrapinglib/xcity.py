@@ -1,93 +1,71 @@
 # -*- coding: utf-8 -*-
 
 import re
-import secrets
-from urllib import parse
-from .httprequest import get_html_by_form
+from urllib.parse import urljoin
+
+from lxml import etree
+
 from .parser import Parser
 
 
 class Xcity(Parser):
+    """XCITY 刮削器（xcity.jp）。
+
+    站点对缺少 Referer 的检索请求会 302 到默认检索词（XCITYオリジナル），因此请求必须带
+    ``Referer: https://xcity.jp/``；检索页 ``/result_published/?q=<番号去连字符>`` 的
+    结果链接形如 ``/avod/detail/?id=197249``。详情页沿用 ``#avodDetails`` 内的
+    ``span.koumoku`` 标签布局。
+    """
+
     source = 'xcity'
+    base_url = 'https://xcity.jp'
 
     expr_number = '//*[@id="hinban"]/text()'
     expr_title = '//*[@id="program_detail_title"]/text()'
-    expr_actor = '//ul/li[@class="credit-links"]/a/text()'
-    expr_actor_link = '//ul/li[@class="credit-links"]/a'
-    expr_actorphoto = '//div[@class="frame"]/div/p/img/@src'
-    expr_studio = '//*[@id="avodDetails"]/div/div[3]/div[2]/div/ul[1]/li[4]/a/span/text()'
-    expr_studio2 = '//strong[contains(text(),"片商")]/../following-sibling::span/a/text()'
-    expr_runtime = '//span[@class="koumoku" and text()="収録時間"]/../text()'
-    expr_label = '//*[@id="avodDetails"]/div/div[3]/div[2]/div/ul[1]/li[5]/a/span/text()'
-    expr_release = '//*[@id="avodDetails"]/div/div[3]/div[2]/div/ul[1]/li[2]/text()'
-    expr_tags = '//span[@class="koumoku" and text()="ジャンル"]/../a[starts-with(@href,"/avod/genre/")]/text()'
-    expr_cover = '//*[@id="avodDetails"]/div/div[3]/div[1]/p/a/@href'
+    expr_actor = '//li[span[@class="koumoku" and text()="出演"]]/a/text()'
+    expr_cover = '//meta[@property="og:image"]/@content'
+    expr_release = '//span[@class="koumoku" and text()="発売日"]/following-sibling::text()'
+    expr_runtime = '//span[@class="koumoku" and text()="収録時間"]/following-sibling::text()'
+    expr_studio = '//*[@id="program_detail_maker_name"]/text()'
+    expr_label = '//*[@id="program_detail_label_name"]/text()'
     expr_director = '//*[@id="program_detail_director"]/text()'
-    expr_series = "//span[contains(text(),'シリーズ')]/../a/span/text()"
-    expr_series2 = "//span[contains(text(),'シリーズ')]/../span/text()"
-    expr_extrafanart = '//div[@id="sample_images"]/div/a/@href'
+    expr_series = "//a[contains(@href,'series_id=')]/span/text()"
+    expr_tags = '//a[@class="genre"]/text()'
+    expr_extrafanart = '//div[@id="sample_images"]//a/@href'
     expr_outline = '//head/meta[@property="og:description"]/@content'
 
-    def queryNumberUrl(self, number):
-        xcity_number = number.replace('-', '')
-        query_result, browser = get_html_by_form(
-            'https://xcity.jp/' + secrets.choice(['sitemap/', 'policy/', 'law/', 'help/', 'main/']),
-            fields={'q': xcity_number.lower()},
-            cookies=self.cookies, proxies=self.proxies, verify=self.verify,
-            return_type='browser')
-        links = browser.links(r'avod\/detail')
-        if not query_result or not query_result.ok or len(links) == 0:
-            raise ValueError(" xcity.jp : has no results ")
-        prelink = links[0]['href']
-        return parse.urljoin('https://xcity.jp', prelink)
+    def extraInit(self):
+        # xcity 对无 Referer 的检索请求一律重定向到默认词，必须显式带上站内 Referer
+        self.extraheader = {'Referer': 'https://xcity.jp/'}
+        self.imagecut = 1
 
-    def getStudio(self, htmltree):
-        return super().getStudio(htmltree).strip('+').replace("', '", '').replace('"', '')
+    def queryNumberUrl(self, number):
+        """站内检索番号，返回第一条详情页地址；无结果返回 None。"""
+        term = number.replace('-', '')
+        html = self.getHtml(f'{self.base_url}/result_published/?q={term}&num=30')
+        if html == 404:
+            return None
+        tree = etree.fromstring(html, etree.HTMLParser())
+        links = tree.xpath('//a[starts-with(@href,"/avod/detail/")]/@href')
+        if not links:
+            return None
+        return urljoin(self.base_url, links[0])
 
     def getRuntime(self, htmltree):
-        return self.getTreeElement(htmltree, self.expr_runtime, 1).strip()
+        text = ''.join(htmltree.xpath(self.expr_runtime)).strip()
+        matched = re.search(r'\d+', text)
+        return matched.group(0) if matched else ''
 
     def getRelease(self, htmltree):
-        try:
-            result = self.getTreeElement(htmltree, self.expr_release, 1)
-            return re.findall(r'\d{4}/\d{2}/\d{2}', result)[0].replace('/', '-')
-        except:
-            return ''
+        text = ''.join(htmltree.xpath(self.expr_release)).strip()
+        matched = re.search(r'\d{4}[/-]\d{1,2}[/-]\d{1,2}', text)
+        return matched.group(0).replace('/', '-') if matched else ''
 
     def getCover(self, htmltree):
-        try:
-            result = super().getCover(htmltree)
-            return 'https:' + result
-        except:
+        cover = super().getCover(htmltree).strip()
+        if not cover:
             return ''
-
-    def getDirector(self, htmltree):
-        try:
-            result = super().getDirector(htmltree).replace(u'\n', '').replace(u'\t', '')
-            return result
-        except:
-            return ''
-
-    def getActorPhoto(self, htmltree):
-        treea = self.getTreeAll(htmltree, self.expr_actor_link)
-        t = {i.text.strip(): i.attrib['href'] for i in treea}
-        o = {}
-        for k, v in t.items():
-            actorpageUrl = "https://xcity.jp" + v
-            try:
-                adtree = self.getHtmlTree(actorpageUrl)
-                picUrl = self.getTreeElement(adtree, self.expr_actorphoto)
-                if 'noimage.gif' in picUrl:
-                    continue
-                o[k] = parse.urljoin("https://xcity.jp", picUrl)
-            except:
-                pass
-        return o
+        return urljoin(self.base_url, cover)
 
     def getExtrafanart(self, htmltree):
-        arts = self.getTreeAll(htmltree, self.expr_extrafanart)
-        extrafanart = []
-        for i in arts:
-            i = "https:" + i
-            extrafanart.append(i)
-        return extrafanart
+        return [urljoin(self.base_url, url) for url in super().getExtrafanart(htmltree) if url]
