@@ -355,6 +355,8 @@ def movie_lists(source_folder, regexstr: str) -> typing.List[str]:
     main_mode = conf.main_mode()
     debug = conf.debug()
     nfo_skip_days = conf.nfo_skip_days()
+    # 是否输出「因 nfo_skip_days 天数不够而被跳过」的日志，只影响打印，不影响跳过行为。
+    nfo_skip_log = conf.nfo_skip_days_log()
     link_mode = conf.link_mode()
     file_type = conf.media_type().lower().split(",")
     trailerRE = re.compile(r'-trailer\.', re.IGNORECASE)
@@ -440,7 +442,7 @@ def movie_lists(source_folder, regexstr: str) -> typing.List[str]:
                     print(f"[!]Metadata {nfo.name} not found for '{absf}'")
             elif nfo_skip_days > 0 and file_modification_days(nfo) <= nfo_skip_days:
                 skip_nfo_days_cnt += 1
-                if debug:
+                if debug and nfo_skip_log:
                     print(f"[!]Skip movie by it's .nfo which modified within {nfo_skip_days} days: '{absf}'")
                 continue
         total.append(absf)
@@ -481,7 +483,7 @@ def movie_lists(source_folder, regexstr: str) -> typing.List[str]:
         print(f"[!]Skip {skip_failed_cnt} movies in failed list '{failed_list_txt_path}'.")
     if skip_unrecognized_cnt:
         print(f"[!]Skip {skip_unrecognized_cnt} movies in unrecognized list '{unrecognized_list_txt_path}'.")
-    if skip_nfo_days_cnt:
+    if skip_nfo_days_cnt and nfo_skip_log:
         print(
             f"[!]Skip {skip_nfo_days_cnt} movies in source folder '{source}' who's .nfo modified within {nfo_skip_days} days.")
     if nfo_skip_days <= 0 or not link_mode or main_mode == 3:
@@ -506,9 +508,9 @@ def movie_lists(source_folder, regexstr: str) -> typing.List[str]:
             rm_list.append(f)
     for f in rm_list:
         total.remove(f)
-        if debug:
+        if debug and nfo_skip_log:
             print(f"[!]Skip file successfully processed within {nfo_skip_days} days: '{f}'")
-    if len(rm_list):
+    if len(rm_list) and nfo_skip_log:
         print(
             f"[!]Skip {len(rm_list)} movies in success folder '{success_folder}' who's .nfo modified within {nfo_skip_days} days.")
 

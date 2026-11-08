@@ -69,20 +69,14 @@ def _save_state():
 def begin_run():
     """开始一次运行。
 
-    清空本轮计数；若上一次运行距现在超过 [telegram] cumulative_reset_hours，
-    则视为新任务、累计从零开始，否则延续上一批继续累加轮次与总数。
+    清空本轮计数；累计状态（notify_state.json）默认沿用上一次的，
+    仅在「没有状态」或「上一批已达标（completed）」时开启新任务。
+    想手动从头累计，删掉 notify_state.json 即可。
     """
     reset()
     state = _load_state()
     now = time.time()
-    try:
-        reset_hours = config.getInstance().telegram_cumulative_reset_hours()
-    except Exception:
-        reset_hours = 12
-    last = float(state.get('updated_at') or 0)
-    # 上一批已达标（completed）或超过重置间隔，都开启新任务
-    if (not state or state.get('completed')
-            or (reset_hours > 0 and now - last > reset_hours * 3600)):
+    if not state or state.get('completed'):
         state = {'started_at': now, 'updated_at': now,
                  'success': 0, 'failed': 0, 'unknown': 0, 'rounds': 0,
                  'completed': False}
@@ -178,8 +172,9 @@ def notify_movie(number, filename, success=True, reason=''):
 def notify_summary(duration=''):
     """整轮结束后的汇总通知（mode=summary/both 时生效）。
 
-    开启 [telegram] cumulative 时，消息同时给出「本轮」与「累计」两行，
-    累计跨轮次保留（超过 cumulative_reset_hours 未再运行则视为新任务）。
+    开启 [telegram] cumulative 时，消息同时给出「本轮」与「累计」两行；
+    累计跨轮次保留，直到达到 cumulative_target（自动归零）或手动删除
+    notify_state.json。
     """
     conf = _conf()
     round_total = sum(int(_stats[k]) for k in ('success', 'failed', 'unknown'))

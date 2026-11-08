@@ -208,6 +208,19 @@ class Config:
     def nfo_skip_days(self) -> int:
         return self.conf.getint("common", "nfo_skip_days", fallback=30)
 
+    def nfo_skip_days_log(self) -> bool:
+        """是否输出「因 nfo_skip_days 被跳过」的日志。
+
+        [common] nfo_skip_days_log:
+          - 1(默认) : 输出每个被跳过的文件(仅调试模式)与数量汇总；
+          - 0        : 不输出任何 nfo_skip_days 相关日志(扫描结果不受影响)。
+        段/键缺失或非法时返回 True，保持默认行为不变。
+        """
+        try:
+            return self.conf.getboolean("common", "nfo_skip_days_log", fallback=True)
+        except Exception:
+            return True
+
     def sort_order(self) -> str:
         """刮削顺序([common] sort_order)。
 
@@ -552,13 +565,6 @@ class Config:
             return self.conf.getboolean('telegram', 'cumulative', fallback=True)
         except Exception:
             return True
-
-    def telegram_cumulative_reset_hours(self) -> float:
-        """超过该小时数未再运行，则视为新任务、累计清零；0=永不自动清零。"""
-        try:
-            return float(self.conf.get('telegram', 'cumulative_reset_hours', fallback='12') or 12)
-        except Exception:
-            return 12.0
 
     def telegram_cumulative_target(self) -> int:
         """一个任务的总条数；达到后只发一条最终汇总。0=不限制（每轮都发）。"""
@@ -1023,6 +1029,7 @@ class Config:
         conf.set(sec1, "actor_gender", "female")
         conf.set(sec1, "del_empty_folder", "1")
         conf.set(sec1, "nfo_skip_days", "30")
+        conf.set(sec1, "nfo_skip_days_log", "1")
         conf.set(sec1, "skip_nfo_check_in_subtitle_mode", "1")
         conf.set(sec1, "ignore_failed_list", "0")
         conf.set(sec1, "failed_list_path", "")
@@ -1168,7 +1175,6 @@ class Config:
         conf.set(sec21, "notify_failed", "1")
         conf.set(sec21, "proxy", "")
         conf.set(sec21, "cumulative", "0")
-        conf.set(sec21, "cumulative_reset_hours", "12")
         conf.set(sec21, "cumulative_target", "0")
         conf.set(sec21, "cumulative_progress", "1")
 
