@@ -87,6 +87,18 @@ def get_data_from_json(
     if conf.cacert_file():
         ca_cert = conf.cacert_file()
 
+    # 按番号前缀指定刮削器：[priority] prefix_source = SSIS=javbus,FC2=fc2
+    # 命中后把该源排到最前，后面的 website 列表保留作为兜底（命中源失败仍可回退）。
+    # 显式指定 -ss/--specified-source 时优先级更高，本规则不生效。
+    if not specified_source:
+        prefix_source = conf.prefix_source_for(file_number)
+        if prefix_source:
+            rest = [s.strip() for s in (sources or "").split(',')
+                    if s.strip() and s.strip() != prefix_source]
+            sources = ",".join([prefix_source] + rest)
+            if conf.debug():
+                print(f"[+]Source by prefix rule: '{file_number}' -> {prefix_source} (sources={sources})")
+
     json_data = search(file_number, sources, proxies=proxies, verify=ca_cert,
                         dbsite=javdb_site, dbcookies=javdb_cookies,
                         morestoryline=conf.is_storyline(),

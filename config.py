@@ -706,6 +706,44 @@ class Config:
             return "merge"
         return v if v in ("merge", "replace") else "merge"
 
+    def _prefix_source_pairs(self) -> typing.List[typing.Tuple[str, str]]:
+        """解析 [priority] prefix_source，返回 [(归一化前缀, 刮削器名), ...]。
+
+        格式：前缀=刮削器，多个用逗号（或分号/空白）分隔，例如：
+            prefix_source = SSIS=javbus, FC2=fc2, CARIB=carib
+        前缀与番号都会去掉 - _ 空格 等分隔符并转大写后再比较，
+        所以 'FC2-PPV' 与 'fc2ppv' 等价。配置非法时返回空列表。
+        """
+        try:
+            raw = self.conf.get("priority", "prefix_source", fallback="") or ""
+        except Exception:
+            return []
+        pairs = []
+        for item in re.split(r"[,;\s]+", raw.strip()):
+            if not item or "=" not in item:
+                continue
+            prefix, source = item.split("=", 1)
+            prefix = re.sub(r"[^0-9a-zA-Z]", "", prefix).upper()
+            source = (source or "").strip().lower()
+            if prefix and source:
+                pairs.append((prefix, source))
+        return pairs
+
+    def prefix_source_for(self, number: str) -> str:
+        """按 prefix_source 规则返回该番号应优先使用的刮削器名；未命中返回空串。
+
+        多个前缀同时命中时取最长前缀（更具体者优先）。
+        """
+        normalized = re.sub(r"[^0-9a-zA-Z]", "", number or "").upper()
+        if not normalized:
+            return ""
+        best_prefix = ""
+        best_source = ""
+        for prefix, source in self._prefix_source_pairs():
+            if normalized.startswith(prefix) and len(prefix) > len(best_prefix):
+                best_prefix, best_source = prefix, source
+        return best_source
+
     def escape_literals(self) -> str:
         return self.conf.get("escape", "literals")
 
@@ -1082,6 +1120,7 @@ class Config:
         conf.set(sec6, "dmm_image_debug", "0")
         conf.set(sec6, "tag_source", "")
         conf.set(sec6, "tag_mode", "merge")
+        conf.set(sec6, "prefix_source", "")
 
         sec7 = "escape"
         conf.add_section(sec7)
