@@ -503,6 +503,77 @@ class Config:
     def cacert_file(self) -> str:
         return self.conf.get('proxy', 'cacert_file')
 
+    # ------------------------------------------------------------------
+    # [telegram] 刮削完成通知
+    # ------------------------------------------------------------------
+    def telegram_switch(self) -> bool:
+        """通知开关；段/项缺失时视为关闭。"""
+        try:
+            return self.conf.getboolean('telegram', 'switch', fallback=False)
+        except Exception:
+            return False
+
+    def telegram_bot_token(self) -> str:
+        try:
+            return (self.conf.get('telegram', 'bot_token', fallback='') or '').strip()
+        except Exception:
+            return ''
+
+    def telegram_chat_id(self) -> str:
+        try:
+            return (self.conf.get('telegram', 'chat_id', fallback='') or '').strip()
+        except Exception:
+            return ''
+
+    def telegram_mode(self) -> str:
+        """movie=每部一条；summary=结束时汇总；both=都发。"""
+        try:
+            value = (self.conf.get('telegram', 'mode', fallback='summary') or 'summary').strip().lower()
+        except Exception:
+            return 'summary'
+        return value if value in ('movie', 'summary', 'both') else 'summary'
+
+    def telegram_notify_failed(self) -> bool:
+        try:
+            return self.conf.getboolean('telegram', 'notify_failed', fallback=True)
+        except Exception:
+            return True
+
+    def telegram_proxy(self) -> str:
+        """通知专用代理（可留空跟随 [proxy]）。"""
+        try:
+            return (self.conf.get('telegram', 'proxy', fallback='') or '').strip()
+        except Exception:
+            return ''
+
+    def telegram_cumulative(self) -> bool:
+        """汇总消息是否同时显示跨轮次累计。"""
+        try:
+            return self.conf.getboolean('telegram', 'cumulative', fallback=True)
+        except Exception:
+            return True
+
+    def telegram_cumulative_reset_hours(self) -> float:
+        """超过该小时数未再运行，则视为新任务、累计清零；0=永不自动清零。"""
+        try:
+            return float(self.conf.get('telegram', 'cumulative_reset_hours', fallback='12') or 12)
+        except Exception:
+            return 12.0
+
+    def telegram_cumulative_target(self) -> int:
+        """一个任务的总条数；达到后只发一条最终汇总。0=不限制（每轮都发）。"""
+        try:
+            return max(0, self.conf.getint('telegram', 'cumulative_target', fallback=0))
+        except Exception:
+            return 0
+
+    def telegram_cumulative_progress(self) -> bool:
+        """设置累计目标时，未达标前是否也发本轮进度（0=只发最后一条）。"""
+        try:
+            return self.conf.getboolean('telegram', 'cumulative_progress', fallback=True)
+        except Exception:
+            return True
+
     def media_type(self) -> str:
         return self.conf.get('media', 'media_type')
 
@@ -1087,6 +1158,19 @@ class Config:
         sec20 = "actor_photo"
         conf.add_section(sec20)
         conf.set(sec20, "download_for_kodi", "0")
+
+        sec21 = "telegram"
+        conf.add_section(sec21)
+        conf.set(sec21, "switch", "0")
+        conf.set(sec21, "bot_token", "")
+        conf.set(sec21, "chat_id", "")
+        conf.set(sec21, "mode", "summary")
+        conf.set(sec21, "notify_failed", "1")
+        conf.set(sec21, "proxy", "")
+        conf.set(sec21, "cumulative", "0")
+        conf.set(sec21, "cumulative_reset_hours", "12")
+        conf.set(sec21, "cumulative_target", "0")
+        conf.set(sec21, "cumulative_progress", "1")
 
         return conf
 
