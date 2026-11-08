@@ -22,6 +22,7 @@ from scraper import get_data_from_json
 from ADC_function import file_modification_days, get_html, parallel_download_files
 from number_parser import get_number
 from core import core_main, core_main_no_net_op, moveFailedFolder, record_unrecognized, debug_print
+import notify
 
 
 def check_update(local_version):
@@ -626,6 +627,23 @@ def rm_empty_folder(path):
             pass
 
 
+def _notify_result(number, movie_path, success, reason=''):
+    """记录并推送单部结果；通知层任何异常都不影响刮削。"""
+    try:
+        notify.record(success)
+        notify.notify_movie(number, os.path.basename(movie_path), success, reason)
+    except Exception:
+        pass
+
+
+def _notify_unknown(movie_path):
+    try:
+        notify.record_unknown()
+        notify.notify_movie('', os.path.basename(movie_path), False, '番号识别失败')
+    except Exception:
+        pass
+
+
 def create_data_and_move(movie_path: str, zero_op: bool, no_net_op: bool, oCC):
     # Normalized number, eg: 111xxx-222.mp4 -> xxx-222.mp4
     debug = config.getInstance().debug()
@@ -641,10 +659,12 @@ def create_data_and_move(movie_path: str, zero_op: bool, no_net_op: bool, oCC):
                 core_main_no_net_op(movie_path, n_number)
             else:
                 core_main(movie_path, n_number, oCC)
+            _notify_result(n_number, movie_path, True)
         else:
             # 番号识别失败：未能进入正常刮削流程，记入无法识别列表(与刮削失败分开)
             print("[-] number empty ERROR")
             record_unrecognized(movie_path)
+            _notify_unknown(movie_path)
         print("[*]======================================================")
     else:
         print(f"[!] [{n_number}] As Number Processing for '{movie_path}'")
@@ -654,6 +674,7 @@ def create_data_and_move(movie_path: str, zero_op: bool, no_net_op: bool, oCC):
             # 番号识别失败：单独归入无法识别列表，不当作刮削失败
             print("[-] number empty ERROR")
             record_unrecognized(movie_path)
+            _notify_unknown(movie_path)
             print("[*]======================================================")
             return
         try:
@@ -661,10 +682,12 @@ def create_data_and_move(movie_path: str, zero_op: bool, no_net_op: bool, oCC):
                 core_main_no_net_op(movie_path, n_number)
             else:
                 core_main(movie_path, n_number, oCC)
+            _notify_result(n_number, movie_path, True)
             print("[*]======================================================")
         except Exception as err:
             print(f"[-] [{movie_path}] ERROR:")
             print('[-]', err)
+            _notify_result(n_number, movie_path, False, err)
 
             try:
                 moveFailedFolder(movie_path)
@@ -679,14 +702,17 @@ def create_data_and_move_with_custom_number(file_path: str, custom_number, oCC, 
         print("[!] [{1}] As Number Processing for '{0}'".format(file_path, custom_number))
         if custom_number:
             core_main(file_path, custom_number, oCC, specified_source, specified_url)
+            _notify_result(custom_number, file_path, True)
         else:
             # 番号识别失败：未能进入正常刮削流程，与批量模式一致，归入无法识别列表
             print("[-] number empty ERROR")
             record_unrecognized(os.path.abspath(file_path))
+            _notify_unknown(file_path)
         print("[*]======================================================")
     except Exception as err:
         print("[-] [{}] ERROR:".format(file_path))
         print('[-]', err)
+        _notify_result(custom_number, file_path, False, err)
 
         if conf.link_mode():
             print("[-]Link {} to failed folder".format(file_path))
@@ -728,6 +754,7 @@ def main(args: tuple) -> Path:
     print('[*]======================================================')
 
     start_time = time.time()
+    notify.reset()
     print('[+]Start at', time.strftime("%Y-%m-%d %H:%M:%S"))
 
     print(f"[+]Load Config file '{conf.ini_path}'.")
@@ -910,8 +937,14 @@ def main(args: tuple) -> Path:
 
     end_time = time.time()
     total_time = str(timedelta(seconds=end_time - start_time))
-    print("[+]Running time", total_time[:len(total_time) if total_time.rfind('.') < 0 else -3],
+    printable_time = total_time[:len(total_time) if total_time.rfind('.') < 0 else -3]
+    print("[+]Running time", printable_time,
           " End at", time.strftime("%Y-%m-%d %H:%M:%S"))
+    # 整批结束后的汇总通知（[telegram] mode=summary/both 时生效）
+    try:
+        notify.notify_summary(printable_time)
+    except Exception:
+        pass
 
     print("[+]All finished!!!")
 

@@ -503,6 +503,49 @@ class Config:
     def cacert_file(self) -> str:
         return self.conf.get('proxy', 'cacert_file')
 
+    # ------------------------------------------------------------------
+    # [telegram] 刮削完成通知
+    # ------------------------------------------------------------------
+    def telegram_switch(self) -> bool:
+        """通知开关；段/项缺失时视为关闭。"""
+        try:
+            return self.conf.getboolean('telegram', 'switch', fallback=False)
+        except Exception:
+            return False
+
+    def telegram_bot_token(self) -> str:
+        try:
+            return (self.conf.get('telegram', 'bot_token', fallback='') or '').strip()
+        except Exception:
+            return ''
+
+    def telegram_chat_id(self) -> str:
+        try:
+            return (self.conf.get('telegram', 'chat_id', fallback='') or '').strip()
+        except Exception:
+            return ''
+
+    def telegram_mode(self) -> str:
+        """movie=每部一条；summary=结束时汇总；both=都发。"""
+        try:
+            value = (self.conf.get('telegram', 'mode', fallback='summary') or 'summary').strip().lower()
+        except Exception:
+            return 'summary'
+        return value if value in ('movie', 'summary', 'both') else 'summary'
+
+    def telegram_notify_failed(self) -> bool:
+        try:
+            return self.conf.getboolean('telegram', 'notify_failed', fallback=True)
+        except Exception:
+            return True
+
+    def telegram_proxy(self) -> str:
+        """通知专用代理（可留空跟随 [proxy]）。"""
+        try:
+            return (self.conf.get('telegram', 'proxy', fallback='') or '').strip()
+        except Exception:
+            return ''
+
     def media_type(self) -> str:
         return self.conf.get('media', 'media_type')
 
@@ -1087,6 +1130,15 @@ class Config:
         sec20 = "actor_photo"
         conf.add_section(sec20)
         conf.set(sec20, "download_for_kodi", "0")
+
+        sec21 = "telegram"
+        conf.add_section(sec21)
+        conf.set(sec21, "switch", "0")
+        conf.set(sec21, "bot_token", "")
+        conf.set(sec21, "chat_id", "")
+        conf.set(sec21, "mode", "summary")
+        conf.set(sec21, "notify_failed", "1")
+        conf.set(sec21, "proxy", "")
 
         return conf
 
