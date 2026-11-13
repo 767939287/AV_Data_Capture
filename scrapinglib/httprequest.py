@@ -10,7 +10,7 @@ from cloudscraper import create_scraper
 
 import config
 
-G_USER_AGENT = r'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
+G_USER_AGENT = r'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36'
 G_DEFAULT_TIMEOUT = 10
 
 
@@ -57,6 +57,28 @@ def _with_solver_cookies(url: str, cookies):
     return cookies
 
 
+def _solver_ua_for(url: str) -> str:
+    """ 取 solver 为该站点解出的 UA（仅 cookie 复用窗口内有值）"""
+    try:
+        return _cf_module().solver_user_agent_for(url)
+    except Exception:
+        return ""
+
+
+def _with_solver_ua(url: str, ua):
+    """ solver 复用窗口内，直连必须沿用 solver 同一个 UA
+
+    cf_clearance 与 UA 强绑定：同一份 cookie 用项目 UA 请求直接 403 Just a moment，
+    换成 solver 的 UA 才 200（2026-11-13 实测）。所以窗口内一律覆盖调用方 UA。
+
+    :param url: 目标 URL
+    :param ua: 调用方传入的 UA（可为 None）
+    :return: solver UA；不在复用窗口内时原样返回 ua
+    """
+    solver_ua = _solver_ua_for(url)
+    return solver_ua or ua
+
+
 def _merge_cookie_header(header: str, extra: dict) -> str:
     """ 把 solver cookie 并入已有的 Cookie 头字符串（同名以已有值为准）"""
     parts = {}
@@ -87,6 +109,29 @@ def _absorb_challenge(url: str, response) -> bool:
         return False
 
 
+def _absorb_connect_failure(url: str, error) -> None:
+    """ 直连在连接层就失败时，把该站点升级为「走 solver」
+
+    javdb 这类被 IP/SNI 封锁的站点不会返回 CF 挑战页，而是 TLS 握手就被 RST，
+    requests 只抛 ConnectionError，靠 _absorb_challenge 永远触发不了 solver。
+    记一次账会同时清掉 cookie 复用窗口，下一次请求直接进 solver。
+
+    :param url: 请求 URL
+    :param error: 捕获到的异常
+    """
+    try:
+        cf = _cf_module()
+        if not cf.is_connect_failure(error):
+            return
+        conf = config.getInstance().cloudflare()
+        if not conf.enable:
+            return
+        cf.mark_challenge_hit(url)
+        _debug(f"[CF] 直连连接失败，站点升级为 solver: {url} ({type(error).__name__})")
+    except Exception:
+        pass
+
+
 def _cf_value(cf, return_type: str = None, encoding: str = None, request=None):
     """ 把 CFResult 按调用方的 return_type 转换成返回值（content/object/文本三态）"""
     if return_type == "content":
@@ -96,13 +141,14 @@ def _cf_value(cf, return_type: str = None, encoding: str = None, request=None):
     return cf.html or ""
 
 
-def _try_cf_bypass(url: str, method: str = 'GET', post_data=None, force: bool = False):
+def _try_cf_bypass(url: str, method: str = 'GET', post_data=None, force: bool = False, proxies=None):
     """ 按 solver-first 规则决定是否调用外部 CF 服务，并返回结果
 
     :param url: 目标 URL
     :param method: 'GET' / 'POST'
     :param post_data: POST 表单数据（dict），GET 时为 None
     :param force: True 时忽略「cookie 复用窗口」，强制走一次 solver
+    :param proxies: 本次请求使用的代理（requests 风格 dict），透传给 solver 以对齐出口
     :return: 命中并成功返回 cf_bypass.CFResult；否则返回 None（表示走原直连逻辑）
 
     调度规则见 cf_bypass.should_use_solver：白名单站点、或命中过 CF 挑战的站点
@@ -120,9 +166,10 @@ def _try_cf_bypass(url: str, method: str = 'GET', post_data=None, force: bool = 
             _debug(f"[CF] 挑战后强制走 Solver: {method} {url}")
         else:
             _debug(f"[CF] 站点 {cf.host_of(url)} 走 Solver（solver-first，跳过直连）: {url}")
-        result = cf.bypass_url(url, conf=conf, method=method, post_data=post_data)
-        # solver 成功：记 cookie + 开复用窗口，窗口内该站点先直连（见 should_use_solver）
-        cf.mark_solver_success(url, result.cookies, ttl=conf.solver_reuse_ttl)
+        result = cf.bypass_url(url, conf=conf, method=method, post_data=post_data, proxy=proxies)
+        # solver 成功：记 cookie + UA + 开复用窗口，窗口内该站点先直连（见 should_use_solver）
+        cf.mark_solver_success(url, result.cookies, ttl=conf.solver_reuse_ttl,
+                               user_agent=getattr(result, "user_agent", None))
         _debug(f"[+]CF bypass: {method} {url}"
                f"（接下来 {int(conf.solver_reuse_ttl)}s 内先直连复用 cookie）")
         return result
@@ -133,12 +180,12 @@ def _try_cf_bypass(url: str, method: str = 'GET', post_data=None, force: bool = 
 
 
 def _retry_by_solver(url: str, method: str = 'GET', post_data=None,
-                     return_type: str = None, encoding: str = None, request=None):
+                     return_type: str = None, encoding: str = None, request=None, proxies=None):
     """ 直连被 CF 拦下后的补救：强制走一次 solver 并返回已转换的结果
 
     :return: 转换后的响应（str/bytes/Response）；solver 不可用时返回 None
     """
-    cf = _try_cf_bypass(url, method, post_data=post_data, force=True)
+    cf = _try_cf_bypass(url, method, post_data=post_data, force=True, proxies=proxies)
     if cf is None:
         return None
     return _cf_value(cf, return_type, encoding, request)
@@ -174,11 +221,13 @@ def get(url: str, cookies=None, ua: str = None, extra_headers=None, return_type:
     是否使用代理应由上层处理
     """
     errors = ""
+    # 复用窗口内必须沿用 solver 的 UA，否则 cf_clearance 立即失效
+    ua = _with_solver_ua(url, ua)
     headers = {"User-Agent": ua or G_USER_AGENT}
     if extra_headers != None:
         headers.update(extra_headers)
     # 命中 CF 白名单 / 命中过挑战的站点优先走外部 CF 服务（未启用/未命中返回 None，原逻辑保持不变）
-    cf = _try_cf_bypass(url, 'GET')
+    cf = _try_cf_bypass(url, 'GET', proxies=proxies)
     if cf is not None:
         if return_type == "content":
             return (cf.html or "").encode(encoding or "utf-8")
@@ -198,7 +247,8 @@ def get(url: str, cookies=None, ua: str = None, extra_headers=None, return_type:
             if _absorb_challenge(url, result):
                 # 直连被拦：同一次调用内改走 solver，失败则保持旧行为（把原响应交回调用方）
                 retried = _retry_by_solver(url, 'GET', return_type=return_type,
-                                           encoding=encoding, request=getattr(result, "request", None))
+                                           encoding=encoding, request=getattr(result, "request", None),
+                                           proxies=proxies)
                 if retried is not None:
                     return retried
             if return_type == "object":
@@ -212,6 +262,7 @@ def get(url: str, cookies=None, ua: str = None, extra_headers=None, return_type:
             if config.getInstance().debug():
                 print(f"[-]Connect: {url} retry {i + 1}/{retry}")
             errors = str(e)
+            _absorb_connect_failure(url, e)
     if config.getInstance().debug():
         if "getaddrinfo failed" in errors:
             print("[-]Connect Failed! Please Check your proxy config")
@@ -228,11 +279,13 @@ def post(url: str, data: dict = None, files=None, cookies=None, ua: str = None, 
     是否使用代理应由上层处理
     """
     errors = ""
+    # 复用窗口内必须沿用 solver 的 UA，否则 cf_clearance 立即失效
+    ua = _with_solver_ua(url, ua)
     headers = {"User-Agent": ua or G_USER_AGENT}
     if extra_headers != None:
         headers.update(extra_headers)
     # 命中 CF 白名单 / 命中过挑战的站点优先走外部 CF 服务（覆盖 jav321 的搜索 POST）
-    cf = _try_cf_bypass(url, 'POST', post_data=data)
+    cf = _try_cf_bypass(url, 'POST', post_data=data, proxies=proxies)
     if cf is not None:
         if return_type == "content":
             return (cf.html or "").encode(encoding or "utf-8")
@@ -246,7 +299,8 @@ def post(url: str, data: dict = None, files=None, cookies=None, ua: str = None, 
                                    verify=verify, cookies=cookies)
             if _absorb_challenge(url, result):
                 retried = _retry_by_solver(url, 'POST', post_data=data, return_type=return_type,
-                                           encoding=encoding, request=getattr(result, "request", None))
+                                           encoding=encoding, request=getattr(result, "request", None),
+                                           proxies=proxies)
                 if retried is not None:
                     return retried
             if return_type == "object":
@@ -260,6 +314,7 @@ def post(url: str, data: dict = None, files=None, cookies=None, ua: str = None, 
             if config.getInstance().debug():
                 print(f"[-]Connect: {url} retry {i + 1}/{retry}")
             errors = str(e)
+            _absorb_connect_failure(url, e)
     if config.getInstance().debug():
         if "getaddrinfo failed" in errors:
             print("[-]Connect Failed! Please check your proxy config")
@@ -293,17 +348,40 @@ class _CFAwareTimeoutAdapter(TimeoutHTTPAdapter):
     直连被 CF 拦下时记一笔，并在同一次调用内改走 solver。
     """
 
+    def __init__(self, *args, cf_proxies_getter=None, **kwargs):
+        """ cf_proxies_getter: 惰性取当前 session 的 proxies，用于把出口透传给 solver"""
+        self._cf_proxies_getter = cf_proxies_getter
+        super().__init__(*args, **kwargs)
+
+    def _current_proxies(self):
+        """ 取本次 session 配置的代理（session.proxies 在 mount 之后才赋值，故惰性读取）"""
+        if self._cf_proxies_getter is None:
+            return None
+        try:
+            return self._cf_proxies_getter()
+        except Exception:
+            return None
+
     def send(self, request, **kwargs):
-        cf = _try_cf_bypass(request.url, request.method or 'GET')
+        cf = _try_cf_bypass(request.url, request.method or 'GET',
+                            proxies=self._current_proxies())
         if cf is not None:
             return _make_cf_response(cf, request)
-        # solver 复用窗口内：直连请求补上解出的 cookie（同名以 session 已有值为准）
+        # solver 复用窗口内：直连请求补上解出的 cookie（同名以 session 已有值为准）与 UA
         extra = _solver_cookies_for(request.url)
         if extra:
             request.headers["Cookie"] = _merge_cookie_header(request.headers.get("Cookie", ""), extra)
-        response = super().send(request, **kwargs)
+        solver_ua = _solver_ua_for(request.url)
+        if solver_ua:
+            request.headers["User-Agent"] = solver_ua
+        try:
+            response = super().send(request, **kwargs)
+        except Exception as e:
+            _absorb_connect_failure(request.url, e)
+            raise
         if _absorb_challenge(request.url, response):
-            retried = _try_cf_bypass(request.url, request.method or 'GET', force=True)
+            retried = _try_cf_bypass(request.url, request.method or 'GET', force=True,
+                                     proxies=self._current_proxies())
             if retried is not None:
                 try:
                     response.close()
@@ -325,8 +403,14 @@ def request_session(cookies=None, ua: str = None, retry: int = 3, timeout: int =
         retries = Retry(total=retry, connect=retry, backoff_factor=1,
                         status_forcelist=[429, 500, 502, 503, 504])
     # 统一挂载 CF 感知适配器：session 型站点（如 javlibrary）命中白名单时透明改走 CF 服务
-    session.mount("https://", _CFAwareTimeoutAdapter(max_retries=retries, timeout=timeout))
-    session.mount("http://", _CFAwareTimeoutAdapter(max_retries=retries, timeout=timeout))
+    def _session_proxies():
+        """惰性读 session.proxies：出口对齐需要 solver 与直连走同一个代理"""
+        return getattr(session, "proxies", None)
+
+    session.mount("https://", _CFAwareTimeoutAdapter(max_retries=retries, timeout=timeout,
+                                                    cf_proxies_getter=_session_proxies))
+    session.mount("http://", _CFAwareTimeoutAdapter(max_retries=retries, timeout=timeout,
+                                                   cf_proxies_getter=_session_proxies))
     if isinstance(cookies, dict) and len(cookies):
         requests.utils.add_dict_to_cookiejar(session.cookies, cookies)
     if verify:
@@ -344,7 +428,7 @@ def get_html_by_form(url, form_select: str = None, fields: dict = None, cookies:
     if timeout is None:
         timeout = G_DEFAULT_TIMEOUT
     # 命中 CF 白名单时优先走外部 CF 服务（主要目标站 xcity 通常不在白名单，默认行为不变）
-    cf = _try_cf_bypass(url, 'GET')
+    cf = _try_cf_bypass(url, 'GET', proxies=proxies)
     if cf is not None:
         if return_type == "content":
             return (cf.html or "").encode(encoding or "utf-8")

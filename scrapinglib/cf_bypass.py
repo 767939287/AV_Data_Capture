@@ -42,6 +42,11 @@ CF_CHALLENGE_MARKERS = (
 # 只按内容判断会把正常响应误判成挑战。
 _CF_CHALLENGE_STATUS = (403, 503)
 
+# CF 服务返回 5xx 时，正文里出现这些标记说明「目标被拦 / IP 被 ban」，重试无意义
+_BLOCKED_MARKERS = (
+    'has blocked this request', 'access denied', 'ip is banned', 'ip has been banned',
+)
+
 # 两次对 CF 服务请求之间的最小间隔(秒)，避免高频冲击服务
 _MIN_REQUEST_INTERVAL = 2.0
 # 可重试错误的默认最大重试轮数
@@ -69,6 +74,8 @@ _challenge_hits: Dict[str, int] = {}
 _reuse_until: Dict[str, float] = {}
 # host -> solver 解出的 cookie（name -> value）
 _solver_cookies: Dict[str, Dict[str, str]] = {}
+# host -> solver 浏览器的 UA（与 cookie 配对使用，见 CFResult.user_agent）
+_solver_ua: Dict[str, str] = {}
 
 
 def host_of(url: str) -> str:
@@ -83,10 +90,40 @@ def host_of(url: str) -> str:
         return ""
 
 
+def normalize_proxy(proxy) -> str:
+    """把调用方的代理配置归一化成 solver 可用的单个代理 URL。
+
+    solver（FlareSolverr / TRAWL）只接受单个代理 URL，而 requests 的 proxies 是
+    ``{"http": ..., "https": ...}`` 字典，且常写成 ``socks5h://``（远程 DNS）。
+    solver 侧没有 socks5h/socks4a 语义，统一降级为 socks5:// / socks4://。
+
+    透传代理的目的是让 solver 与直连**同出口**：出口 IP 不一致时，clearance 在
+    严格站点上会被重新判定为挑战。
+
+    :param proxy: requests 风格代理（dict / str / None）
+    :return: 形如 socks5://host:port 的 URL；无可用代理返回空串
+    """
+    if not proxy:
+        return ""
+    if isinstance(proxy, dict):
+        value = proxy.get("https") or proxy.get("http") or ""
+    else:
+        value = proxy
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    if value.startswith("socks5h://"):
+        value = "socks5://" + value[len("socks5h://"):]
+    elif value.startswith("socks4a://"):
+        value = "socks4://" + value[len("socks4a://"):]
+    return value
+
+
 def session_id_for(url: str) -> str:
     """按目标站点生成 solver 会话标识：``adc-{host}``（host 里的非法字符换成 ``-``）。
 
-    外部服务据此按站点隔离浏览器会话，solver 侧日志也能看出是哪个站触发的。
+    当前未在请求路径上使用：TRAWL 的 ``sessionId`` 要求会话必须已通过
+    ``POST /sessions`` 创建，临时拼接的 id 会直接 404，所以 /scrape 不再传它。
 
     :param url: 目标 URL
     :return: 会话标识；url 无 host 时返回空串（调用方据此不写该字段）
@@ -118,12 +155,14 @@ def solver_reuse_active(url: str) -> bool:
 
 
 def mark_solver_success(url: str, cookies: Optional[Dict[str, str]] = None,
-                        ttl: Optional[float] = None) -> None:
-    """solver 成功：记录该站点的 cookie 并开（或续）复用窗口。
+                        ttl: Optional[float] = None,
+                        user_agent: Optional[str] = None) -> None:
+    """solver 成功：记录该站点的 cookie/UA 并开（或续）复用窗口。
 
     :param url: 刚被 solver 解出的目标 URL
     :param cookies: solver 返回的 cookies（name -> value）
     :param ttl: 复用窗口秒数，缺省用 DEFAULT_REUSE_TTL；<=0 表示不复用
+    :param user_agent: solver 浏览器的 UA；复用 cookie 时必须配套使用
     """
     host = host_of(url)
     if not host:
@@ -137,6 +176,8 @@ def mark_solver_success(url: str, cookies: Optional[Dict[str, str]] = None,
     with _state_lock:
         if cookies:
             _solver_cookies[host] = dict(cookies)
+        if user_agent:
+            _solver_ua[host] = str(user_agent)
         _reuse_until[host] = time.monotonic() + window
 
 
@@ -151,19 +192,41 @@ def mark_challenge_hit(url: str) -> None:
     with _state_lock:
         _challenge_hits[host] = _challenge_hits.get(host, 0) + 1
         _reuse_until.pop(host, None)
+        # 窗口失效时 cookie 与 UA 必须**成对丢弃**：留着单边的数据只会让下一次请求
+        # 「带 cookie 但 UA 不匹配」，反而多一次 403（MDCx 铁律 #2）
+        _solver_cookies.pop(host, None)
+        _solver_ua.pop(host, None)
 
 
 def solver_cookies_for(url: str) -> Dict[str, str]:
     """取 solver 为该站点解出的 cookie（副本；无则空 dict）。
 
+    只在 cookie 复用窗口内返回：窗口过期后 clearance 基本失效，继续带上反而可能
+    拿到「半失效」页面，所以直接视为没有。
+
     :param url: 目标 URL
     :return: cookie 字典
     """
     host = host_of(url)
-    if not host:
+    if not host or not solver_reuse_active(url):
         return {}
     with _state_lock:
         return dict(_solver_cookies.get(host) or {})
+
+
+def solver_user_agent_for(url: str) -> str:
+    """取 solver 为该站点解出的浏览器 UA（仅在 cookie 复用窗口内有效）。
+
+    cf_clearance 与 UA 绑定：窗口内直连必须沿用 solver 的 UA，否则仍会被挑战。
+
+    :param url: 目标 URL
+    :return: UA 字符串；无则空串
+    """
+    host = host_of(url)
+    if not host or not solver_reuse_active(url):
+        return ""
+    with _state_lock:
+        return _solver_ua.get(host) or ""
 
 
 def should_use_solver(url: str, conf) -> bool:
@@ -230,12 +293,40 @@ def is_cf_challenge_response(response, text: Optional[str] = None) -> bool:
     return any(marker in lowered for marker in CF_CHALLENGE_MARKERS)
 
 
+# 直连「连接层失败」的异常类名（按 MRO 匹配，兼容 requests / urllib3 各版本）
+_CONNECT_FAILURE_TYPES = ("ConnectionError", "ConnectTimeout", "SSLError")
+
+# 本地环境类故障：代理挂掉/不可达不代表目标站点不可达，不能据此把站点判死
+_LOCAL_FAILURE_TYPES = ("ProxyError",)
+
+
+def is_connect_failure(error) -> bool:
+    """判断异常是否为「直连在连接层就失败」（DNS 失败 / 握手被重置 / TLS 失败）。
+
+    javdb 这类被 IP/SNI 层封锁的站点不会返回 CF 挑战页，而是 TLS 握手阶段就被
+    RST，requests 只抛 ConnectionError。这种情况同样说明「该站直连不可用」，应
+    当和命中 CF 挑战一样升级到 solver，否则 solver_first 永远触发不了。
+
+    ProxyError 明确排除：代理故障是本机环境问题，不代表目标站点不可达。
+
+    :param error: 捕获到的异常对象
+    :return: 属于连接层失败返回 True
+    """
+    if error is None:
+        return False
+    names = {cls.__name__ for cls in type(error).__mro__}
+    if any(name in names for name in _LOCAL_FAILURE_TYPES):
+        return False
+    return any(name in names for name in _CONNECT_FAILURE_TYPES)
+
+
 def reset_state() -> None:
     """清空 solver-first 状态（供测试/诊断使用）。"""
     with _state_lock:
         _challenge_hits.clear()
         _reuse_until.clear()
         _solver_cookies.clear()
+        _solver_ua.clear()
 
 
 class CFBypassError(Exception):
@@ -262,6 +353,9 @@ class CFResult:
     cookies: Dict[str, str]   # 回填用 cookies（name->value）
     status: int               # 目标站点返回的 HTTP 状态码
     url: str                  # 最终落地 URL
+    # solver 浏览器的 UA。cf_clearance 与 UA 强绑定：复用 cookie 直连时必须用同一个
+    # UA，否则依旧 403 Just a moment（实测：项目 UA 403 / solver UA 200）
+    user_agent: str = ""
 
 
 class CFBypassClient:
@@ -319,6 +413,14 @@ class CFBypassClient:
             # 429=池饱和，503=池预热中，交给上层退避重试
             raise CFBypassError(f"CF service busy ({resp.status_code})", retryable=True)
         if resp.status_code >= 500:
+            # 服务端明确告知「目标被拦 / IP 被 ban」属于确定性失败，重试只是白等：
+            # FlareSolverr 会抛 "Cloudflare has blocked this request"，TRAWL 的 500 也带同类信息。
+            try:
+                body = (resp.text or "")[:400]
+            except Exception:
+                body = ""
+            if any(m in body.lower() for m in _BLOCKED_MARKERS):
+                raise CFBypassError(f"CF service blocked target ({resp.status_code}): {body}")
             raise CFBypassError(f"CF service error ({resp.status_code})", retryable=True)
         if resp.status_code >= 400:
             raise CFBypassError(f"CF service bad request ({resp.status_code})")
@@ -370,8 +472,11 @@ class CFBypassClient:
         return CFResult(
             html=solution.get("response") or "",
             cookies=self._extract_cookies(solution.get("cookies")),
+            # 注意：FlareSolverr 的 solution.status 恒为 200（Selenium 取不到真实状态码，
+            # 源码内标注 # todo: fix），不能当作目标站点的真实 HTTP 状态使用。
             status=int(solution.get("status") or 0),
             url=solution.get("url") or url,
+            user_agent=str(solution.get("userAgent") or ""),
         )
 
     def _parse_trawl_native(self, data: dict, url: str) -> CFResult:
@@ -389,6 +494,7 @@ class CFBypassClient:
             cookies=self._extract_cookies(data.get("cookies")),
             status=int(data.get("statusCode") or 0),
             url=data.get("url") or url,
+            user_agent=str(data.get("userAgent") or ""),
         )
 
     def _verify_landing_url(self, result: CFResult):
@@ -410,12 +516,14 @@ class CFBypassClient:
         raise CFBypassError(f"Landing host '{hostname}' is not in cf_trusted_hosts")
 
     def _request_flaresolverr(self, url: str, method_up: str,
-                              post_data: Optional[dict]) -> CFResult:
+                              post_data: Optional[dict],
+                              proxy_url: str = "") -> CFResult:
         """向 FlareSolverr v1 兼容端点发起请求并解析。
 
         :param url: 目标 URL
         :param method_up: 已大写的 HTTP 方法
         :param post_data: POST 表单数据
+        :param proxy_url: 归一化后的代理 URL（空串=不让 solver 走代理）
         :return: CFResult
         :raises CFBypassError: 请求或解析失败
         """
@@ -427,28 +535,34 @@ class CFBypassClient:
         if post_data:
             # FlareSolverr 的 postData 需要 form-encoded 字符串
             payload["postData"] = urlencode(post_data, doseq=True)
+        if proxy_url:
+            # FlareSolverr v1 的 proxy 形如 {"url": "socks5://host:port"}，
+            # 让 solver 与直连走同一出口，避免 clearance 因 IP 不一致失效。
+            payload["proxy"] = {"url": proxy_url}
         resp = self._post_json(self._endpoint("/v1"), payload)
         return self._parse_flaresolverr(self._resp_json(resp), url)
 
     def _request_once(self, url: str, method_up: str,
-                      post_data: Optional[dict]) -> CFResult:
+                      post_data: Optional[dict],
+                      proxy_url: str = "") -> CFResult:
         """按配置的服务类型发起一次 CF 服务请求并解析结果。
 
         :param url: 目标 URL
         :param method_up: 已大写的 HTTP 方法
         :param post_data: POST 表单数据
+        :param proxy_url: 归一化后的代理 URL（空串=不让 solver 走代理）
         :return: CFResult
         :raises CFBypassError: 请求或解析失败
         """
-        # TRAWL 原生 /scrape 仅支持 GET/HEAD；POST 或原生解析失败时回退 FlareSolverr v1
+        # TRAWL 原生 /scrape 仅用于 GET；POST 或原生解析失败时回退 FlareSolverr v1
         if self.conf.service == "trawl" and method_up == "GET":
             try:
                 payload = {"url": url, "maxTimeout": int(self.conf.timeout) * 1000}
-                # sessionId 让外部服务知道这次请求属于哪个站点（按站点隔离会话/统计），
-                # 也方便在 solver 侧日志里一眼看出是谁触发的。TRAWL 原生 schema 支持该字段。
-                session_id = session_id_for(url)
-                if session_id:
-                    payload["sessionId"] = session_id
+                if proxy_url:
+                    # TRAWL 原生 /scrape 的 proxy 是字符串，且为严格路由（不走直连层）
+                    payload["proxy"] = proxy_url
+                # 不要传 sessionId：TRAWL 要求该会话必须已通过 POST /sessions 创建，
+                # 传一个临时拼出来的 id 会直接 404（白跑一次请求且触发节流）。
                 resp = self._post_json(self._endpoint("/scrape"), payload)
                 return self._parse_trawl_native(self._resp_json(resp), url)
             except CFBypassError as e:
@@ -457,27 +571,29 @@ class CFBypassClient:
                     raise
                 if config.getInstance().debug():
                     print(f"[CF] trawl native fallback to /v1: {e}")
-        return self._request_flaresolverr(url, method_up, post_data)
+        return self._request_flaresolverr(url, method_up, post_data, proxy_url)
 
     # ------------------------------------------------------------------
     # 对外接口
     # ------------------------------------------------------------------
     def bypass(self, url: str, method: str = 'GET',
-               post_data: Optional[dict] = None) -> CFResult:
+               post_data: Optional[dict] = None, proxy=None) -> CFResult:
         """调用 CF 服务解析目标 URL 的挑战。
 
         :param url: 目标 URL
         :param method: 'GET' 或 'POST'
         :param post_data: POST 时的表单数据（dict）
+        :param proxy: 本次请求使用的代理（requests 风格 dict/str），透传给 solver 对齐出口
         :return: CFResult
         :raises CFBypassError: 服务不可用/返回非 ok/落地域名校验失败
         """
         method_up = (method or "GET").upper()
+        proxy_url = normalize_proxy(proxy)
         rounds = _DEFAULT_RETRY_ROUNDS
         last_error = None
         for attempt in range(rounds + 1):
             try:
-                result = self._request_once(url, method_up, post_data)
+                result = self._request_once(url, method_up, post_data, proxy_url)
                 self._verify_landing_url(result)
                 if config.getInstance().debug():
                     print(f"[CF] bypass ok: {url} -> {result.url} ({result.status})")
@@ -507,13 +623,14 @@ _CFBypassClient_cache = None  # 模块级客户端缓存，避免每次请求重
 
 
 def bypass_url(url: str, conf=None, method: str = 'GET',
-               post_data: Optional[dict] = None) -> CFResult:
+               post_data: Optional[dict] = None, proxy=None) -> CFResult:
     """模块级便捷入口：内部取配置并缓存客户端实例。
 
     :param url: 目标 URL
     :param conf: 可选 CloudflareConf，缺省用 config.getInstance().cloudflare()
     :param method: 'GET' / 'POST'
     :param post_data: POST 表单
+    :param proxy: 本次请求的代理（dict/str），透传给 solver 以对齐出口
     :return: CFResult
     :raises CFBypassError: 调用失败（含未启用时）
     """
@@ -528,4 +645,4 @@ def bypass_url(url: str, conf=None, method: str = 'GET',
             or _CFBypassClient_cache.conf.service != conf.service
             or _CFBypassClient_cache.conf.timeout != conf.timeout):
         _CFBypassClient_cache = CFBypassClient(conf)
-    return _CFBypassClient_cache.bypass(url, method=method, post_data=post_data)
+    return _CFBypassClient_cache.bypass(url, method=method, post_data=post_data, proxy=proxy)
