@@ -795,6 +795,7 @@ class Config:
         采用 fallback 防御式读取，保证旧 config.ini 无 [cloudflare] 段时零副作用：
         switch=0 时 enable 为 False，程序行为与改动前完全一致。
         solver_first / solver_reuse_ttl 缺失时回退到「自动升级 + 600s 复用」默认值。
+        debug（CF 日志开关）缺失时跟随 [debug_mode] switch，保持原有行为。
         """
         try:
             sec = "cloudflare"
@@ -814,12 +815,20 @@ class Config:
                     sec, "solver_reuse_ttl", fallback=CloudflareConf.DEFAULT_REUSE_TTL)
             except ValueError:
                 reuse_ttl = CloudflareConf.DEFAULT_REUSE_TTL
+            # CF 日志开关：未配置该键时跟随 [debug_mode] switch（保持升级前的日志行为）
+            try:
+                cf_debug = self.conf.getboolean(sec, "debug")
+            except Exception:
+                try:
+                    cf_debug = self.debug()
+                except Exception:
+                    cf_debug = False
             return CloudflareConf(switch, service, host, timeout, sites, trusted,
-                                  solver_first, reuse_ttl)
+                                  solver_first, reuse_ttl, cf_debug)
         except Exception:
             # 任何读取异常都不应影响主流程，直接返回「已禁用」默认值
             return CloudflareConf(False, "flaresolverr", CloudflareConf.DEFAULT_HOST,
-                                  CloudflareConf.DEFAULT_TIMEOUT, [], [])
+                                  CloudflareConf.DEFAULT_TIMEOUT, [], [], debug=False)
 
     def javdb_channel(self) -> "JavdbChannelConf":
         """ 读取 [javdb_channel] 段（JavDB 三通道选择）
@@ -1301,6 +1310,9 @@ class CloudflareConf():
         不再先打直连，直接交给外部 CF 服务；
       - solver_reuse_ttl：solver 成功后的 cookie 复用窗口（秒），窗口内先直连
         并自动带上 solver 解出的 cookie，直连又被拦才重新进 solver。0 = 不复用。
+
+    日志开关：
+      - debug=True：打印 [CF] 调度/复用/重试等日志；False 时静默（不受 debug_mode 影响）。
     """
 
     DEFAULT_HOST = "http://127.0.0.1:8191"
@@ -1311,7 +1323,8 @@ class CloudflareConf():
     def __init__(self, switch, service: str, host: str, timeout: int,
                  sites: list, trusted_hosts: list,
                  solver_first: bool = True,
-                 solver_reuse_ttl: int = DEFAULT_REUSE_TTL):
+                 solver_reuse_ttl: int = DEFAULT_REUSE_TTL,
+                 debug: bool = True):
         """ 保存原始配置值
 
         :param switch: 原始开关值（'0'/'1'/0/1 等）
@@ -1322,6 +1335,7 @@ class CloudflareConf():
         :param trusted_hosts: 落地域名校验列表
         :param solver_first: 命中过 CF 挑战的站点是否自动升级为「先走 solver」
         :param solver_reuse_ttl: solver 成功后 cookie 复用窗口（秒），0=不复用
+        :param debug: 是否打印 [CF] 诊断日志（缺省配置键时由 debug_mode 决定）
         """
         # switch 兼容 bool（getboolean）与 '0'/'1' 字符串两种来源
         self.enable = switch == '1' or switch == 1
@@ -1349,6 +1363,8 @@ class CloudflareConf():
             ttl = self.DEFAULT_REUSE_TTL
         # 负数视为「不复用」，避免出现永远不过期的窗口
         self.solver_reuse_ttl = max(0, ttl)
+        # CF 日志开关（只影响 [CF] 相关输出）
+        self.debug = bool(debug)
 
     def is_whitelisted(self, url: str) -> bool:
         """ 判断 URL 的 host 是否命中生效站点白名单

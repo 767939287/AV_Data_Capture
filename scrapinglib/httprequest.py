@@ -14,10 +14,13 @@ G_USER_AGENT = r'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (K
 G_DEFAULT_TIMEOUT = 10
 
 
-def _debug(msg: str):
-    """ debug 模式下打印网络层诊断信息（非 debug 保持安静）"""
+def _cf_debug(msg: str):
+    """ 打印 [CF] 诊断信息，受 [cloudflare] debug 开关控制
+
+    debug=1 打印、0 静默；配置缺省时由 config.CloudflareConf 回退到 [debug_mode] switch。
+    """
     try:
-        if config.getInstance().debug():
+        if config.getInstance().cloudflare().debug:
             print(msg)
     except Exception:
         pass
@@ -103,7 +106,7 @@ def _absorb_challenge(url: str, response) -> bool:
         if not cf.is_cf_challenge_response(response):
             return False
         cf.mark_challenge_hit(url)
-        _debug(f"[CF] 命中 Cloudflare 挑战: {url}")
+        _cf_debug(f"[CF] 命中 Cloudflare 挑战: {url}")
         return True
     except Exception:
         return False
@@ -127,7 +130,7 @@ def _absorb_connect_failure(url: str, error) -> None:
         if not conf.enable:
             return
         cf.mark_challenge_hit(url)
-        _debug(f"[CF] 直连连接失败，站点升级为 solver: {url} ({type(error).__name__})")
+        _cf_debug(f"[CF] 直连连接失败，站点升级为 solver: {url} ({type(error).__name__})")
     except Exception:
         pass
 
@@ -163,19 +166,19 @@ def _try_cf_bypass(url: str, method: str = 'GET', post_data=None, force: bool = 
         if not force and not cf.should_use_solver(url, conf):
             return None
         if force:
-            _debug(f"[CF] 挑战后强制走 Solver: {method} {url}")
+            _cf_debug(f"[CF] 挑战后强制走 Solver: {method} {url}")
         else:
-            _debug(f"[CF] 站点 {cf.host_of(url)} 走 Solver（solver-first，跳过直连）: {url}")
+            _cf_debug(f"[CF] 站点 {cf.host_of(url)} 走 Solver（solver-first，跳过直连）: {url}")
         result = cf.bypass_url(url, conf=conf, method=method, post_data=post_data, proxy=proxies)
         # solver 成功：记 cookie + UA + 开复用窗口，窗口内该站点先直连（见 should_use_solver）
         cf.mark_solver_success(url, result.cookies, ttl=conf.solver_reuse_ttl,
                                user_agent=getattr(result, "user_agent", None))
-        _debug(f"[+]CF bypass: {method} {url}"
-               f"（接下来 {int(conf.solver_reuse_ttl)}s 内先直连复用 cookie）")
+        _cf_debug(f"[+]CF bypass: {method} {url}"
+                  f"（接下来 {int(conf.solver_reuse_ttl)}s 内先直连复用 cookie）")
         return result
     except Exception as e:
-        # 任何异常都回退到原直连逻辑；非 debug 模式保持安静
-        _debug(f"[-]CF bypass failed（回退直连）: {url} {e}")
+        # 任何异常都回退到原直连逻辑；CF 日志开关关闭时保持安静
+        _cf_debug(f"[-]CF bypass failed（回退直连）: {url} {e}")
         return None
 
 

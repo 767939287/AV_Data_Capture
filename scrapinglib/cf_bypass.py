@@ -569,7 +569,7 @@ class CFBypassClient:
                 # 可重试类错误向上抛出；仅「格式不识别」等非可重试错误才回退 v1
                 if e.retryable:
                     raise
-                if config.getInstance().debug():
+                if self.conf.debug:
                     print(f"[CF] trawl native fallback to /v1: {e}")
         return self._request_flaresolverr(url, method_up, post_data, proxy_url)
 
@@ -595,7 +595,7 @@ class CFBypassClient:
             try:
                 result = self._request_once(url, method_up, post_data, proxy_url)
                 self._verify_landing_url(result)
-                if config.getInstance().debug():
+                if self.conf.debug:
                     print(f"[CF] bypass ok: {url} -> {result.url} ({result.status})")
                 return result
             except CFBypassError as e:
@@ -605,7 +605,7 @@ class CFBypassClient:
                     raise
                 # 退避递增：2s、4s ...（叠加节流保证最小间隔）
                 delay = _MIN_REQUEST_INTERVAL * (attempt + 1)
-                if config.getInstance().debug():
+                if self.conf.debug:
                     print(f"[CF] retry {attempt + 1}/{rounds}: {e} (wait {delay}s)")
                 time.sleep(delay)
         raise last_error or CFBypassError("CF bypass failed")

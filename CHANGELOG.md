@@ -1,5 +1,16 @@
 # 更新日志
 
+## [未发布]
+
+### 新增
+
+- **`[cloudflare] debug` —— CF 日志独立开关**
+  - `1`：打印全部 `[CF]` 日志，包括 solver-first 跳过直连、挑战后强制走 Solver、
+    命中挑战/连接失败升级、cookie 复用成功、bypass 失败回退直连、TRAWL 回退 `/v1`、重试轮次。
+  - `0`：以上 `[CF]` 日志全部静默，**即使 `[debug_mode] switch = 1` 也不会打印**。
+  - 未配置该键时跟随 `[debug_mode] switch`，老配置文件行为不变。
+  - 该开关只影响 `[CF]` 相关输出，其余 debug 日志不受影响（`config.CloudflareConf.debug`）。
+
 ## [6.6.9] - 2026-11-08
 
 ### 新增
