@@ -89,6 +89,9 @@ def cutImage(imagecut, path, thumb_path, poster_path, skip_facerec=False):
                 img2 = img.crop(face_crop_height(fullpath_fanart, width, height))
             else:  # 如果等于2/3
                 img2 = img
+            if Path(fullpath_poster).suffix.lower() in ('.jpg', '.jpeg', '.jpge') and img2.mode not in ('RGB', 'L'):
+                # 目标为 JPEG 时先丢弃透明通道，避免 'cannot write mode RGBA as JPEG'
+                img2 = img2.convert('RGB')
             img2.save(fullpath_poster)
             print(f"[+]Image Cutted!     {Path(fullpath_poster).name}")
         except Exception as e:

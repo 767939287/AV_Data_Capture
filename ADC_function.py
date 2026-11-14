@@ -433,6 +433,56 @@ def file_not_exist_or_empty(filepath) -> bool:
     return not os.path.isfile(filepath) or os.path.getsize(filepath) == 0
 
 
+# 扩展名 -> Pillow 期望的目标格式，用于识别“webp 内容存成 .jpg”这类名实不符的图片
+IMAGE_FORMAT_BY_EXT = {
+    '.jpg': 'JPEG', '.jpeg': 'JPEG', '.jpge': 'JPEG',
+    '.png': 'PNG', '.bmp': 'BMP', '.gif': 'GIF', '.webp': 'WEBP',
+}
+
+
+def normalize_image_file(filepath) -> bool:
+    """
+    下载完成后校正图片真实格式。
+
+    站点常直接返回 webp（有的还带透明通道），而项目按 URL 推断出 .jpg 文件名，
+    导致 Pillow 后续按扩展名以 JPEG 编码器保存时抛 'cannot write mode RGBA as JPEG'，
+    裁剪/水印直接失败。此处在写盘后立即按扩展名把内容转成对应的常规格式。
+
+    :filepath 已写盘的本地图片路径
+    :return 是否发生了转换；非图片、格式已正确、转换失败都返回 False（不影响主流程）
+    """
+    try:
+        fullpath = Path(filepath)
+        if not fullpath.is_file() or fullpath.stat().st_size == 0:
+            return False
+        target = IMAGE_FORMAT_BY_EXT.get(fullpath.suffix.lower())
+        if not target:
+            return False  # 非图片文件（如预告片 mp4）
+        from PIL import Image
+        with Image.open(fullpath) as img:
+            real_format = (img.format or '').upper()
+            if real_format == target:
+                return False
+            if target == 'JPEG':
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    # 有透明通道：合成到白底，避免出现黑边
+                    rgba = img.convert('RGBA')
+                    img_out = Image.new('RGB', rgba.size, (255, 255, 255))
+                    img_out.paste(rgba, mask=rgba.split()[-1])
+                else:
+                    img_out = img.convert('RGB')
+            elif target == 'BMP':
+                img_out = img.convert('RGB')
+            else:
+                img_out = img.copy()
+            img_out.save(fullpath, target)
+        print(f'[+]Image Converted!  {fullpath.name} ({real_format} -> {target})')
+        return True
+    except Exception as e:
+        print(f'[-]Image convert skipped: {filepath} ({e})')
+        return False
+
+
 def is_japanese(raw: str) -> bool:
     """
     日语简单检测
@@ -511,6 +561,7 @@ def download_one_file(args) -> str:
     if isinstance(filebytes, bytes) and len(filebytes):
         with save_path.open('wb') as fpbyte:
             if len(filebytes) == fpbyte.write(filebytes):
+                normalize_image_file(save_path)
                 return str(save_path)
 
 

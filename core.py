@@ -190,8 +190,11 @@ def download_file_with_filename(url, filename, path, filepath, json_headers=None
             if r == '':
                 print('[-]Movie Download Data not found!')
                 return
-            with open(os.path.join(path, filename), "wb") as code:
+            fullpath = os.path.join(path, filename)
+            with open(fullpath, "wb") as code:
                 code.write(r)
+            # webp 等格式按扩展名就地转换，避免后续裁剪/水印保存失败
+            normalize_image_file(fullpath)
             return
         except requests.exceptions.ProxyError:
             i += 1
