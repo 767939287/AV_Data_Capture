@@ -283,7 +283,7 @@ class JavdbApp(Parser):
                 resp = http_get(url, extra_headers=headers, cookies=self.cookies,
                                 proxies=self.proxies, verify=self.verify, return_type="object")
             except Exception as e:
-                if config.getInstance().debug():
+                if config.getInstance().javdb_debug():
                     print(f"[-]javdb_app api failed: {url} {e}")
                 continue
             if resp is None or resp.status_code != 200:
@@ -400,6 +400,6 @@ class JavdbApp(Parser):
             if plain is not None:
                 return plain
             # 解密失败（格式不符）时回退原始字节，避免整张图丢失
-            if config.getInstance().debug():
+            if config.getInstance().javdb_debug():
                 print(f"[-]javdb_app decrypt failed, fallback raw: {url}")
         return content

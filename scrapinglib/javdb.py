@@ -6,12 +6,17 @@ from lxml import etree
 
 import config
 from .httprequest import request_session, get_html_by_scraper
+from . import tls_request
 from .parser import Parser
 
 # javdb 对「声明要 HTML」的请求会 302 到 /login（登录墙，实测 2026-11）。
-# 声明 Accept: */* 时服务端直接吐页面，不触发登录判定，因此本通道固定使用该值。
-# 注意：cloudscraper 默认 Accept 是 text/html,...，必须显式覆盖。
+# 首选 curl_cffi 做 TLS 指纹伪装（行为等同真浏览器）；未安装/未启用时回退
+# cloudscraper + Accept: */*（声明 */* 不触发服务端的 JS 校验路径）。
 _ACCEPT_ANY = {"Accept": "*/*"}
+
+# 登录页内容判据（借鉴 amane）：登录表单的 action 含 user_sessions，且带密码框。
+# 覆盖「状态码 200 但内容就是登录表单」的情况（URL 可能不带 /login）。
+_LOGIN_MARKERS = ("user_sessions", 'type="password"')
 
 # 落地页判定结果
 _C_OK = "OK"
@@ -181,7 +186,7 @@ class Javdb(Parser):
                 result = self._run_channel(name, number)
             except Exception as e:
                 result = None
-                if config.getInstance().debug():
+                if config.getInstance().javdb_debug():
                     print(f"[-]javdb {name} channel failed: {e}")
             if result and result != 404:
                 return result
@@ -218,17 +223,36 @@ class Javdb(Parser):
         return candidates
 
     def _fetch(self, url):
-        """请求页面（固定 Accept: */*，绕开 javdb 的登录墙）
+        """请求页面
+
+        优先用 curl_cffi 做 TLS 指纹伪装（行为等同真浏览器，不会触发 javdb
+        「声明 HTML 就跳 /login」的判定）；未安装/未启用时回退 cloudscraper + Accept: */*。
 
         :param url: 目标 URL
         :return: (text, final_url, status)；请求失败返回 (None, url, None)
         """
+        conf = config.getInstance()
+        try:
+            impersonate = conf.javdb_tls_impersonate()
+        except Exception:
+            impersonate = ""
+        if impersonate:
+            try:
+                resp = tls_request.get(
+                    url, cookies=self.cookies, proxies=self.proxies, verify=self.verify,
+                    timeout=30, impersonate=impersonate)
+                if resp is not None:
+                    return (resp.text or ""), (resp.url or url), resp.status_code
+            except Exception as e:
+                if conf.javdb_debug():
+                    print(f'[-]javdb tls fetch failed: {url} {type(e).__name__}: {e}')
+        # 回退：cloudscraper + Accept: */*（旧行为）
         try:
             resp = get_html_by_scraper(
                 url, cookies=self.cookies, proxies=self.proxies, verify=self.verify,
                 return_type="object", extra_headers=_ACCEPT_ANY)
         except Exception as e:
-            if config.getInstance().debug():
+            if conf.javdb_debug():
                 print(f'[-]javdb request failed: {url} {type(e).__name__}: {e}')
             return None, url, None
         if resp is None:
@@ -259,6 +283,9 @@ class Javdb(Parser):
         except Exception:
             path = ""
         if "/login" in path:
+            return _C_LOGIN
+        # 借鉴 amane：状态码 200 但内容是登录表单（无码条目/无码演员档案需要登录）
+        if all(marker in text for marker in _LOGIN_MARKERS):
             return _C_LOGIN
         if status == 403 or "Just a moment" in text or "cf-browser-verification" in text:
             return _C_CF
@@ -372,8 +399,8 @@ class Javdb(Parser):
             print(f'    - {host or "-":<18} {kind:<14} status={status} url={url}')
         kinds = [kind for _host, kind, _url, _status in diag]
         if any('LOGIN' in k for k in kinds):
-            print('[!]提示：LOGIN 表示请求被跳转到登录页。本通道已固定 Accept: */* 规避，')
-            print('           若仍出现，通常是该站点对你当前出口有登录/风控要求。')
+            print('[!]提示：LOGIN 表示请求被跳转到登录页/返回登录表单（实测：无码条目与无码演员档案需要登录态，')
+            print('           搜索页与有码详情页一般不需要）。可检查 [javdb] cookie，或确认 tls_impersonate 已启用。')
         if any('HIJACK' in k for k in kinds):
             print('[!]提示：HIJACK 表示被跳到非 javdb 域名（广告劫持），请从 [javdb] domains 移除该站。')
         if any('CF' in k for k in kinds):

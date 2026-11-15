@@ -129,7 +129,7 @@ class JavdbApi(Parser):
         try:
             page = self.getHtml(url)
         except Exception as e:
-            if config.getInstance().debug():
+            if config.getInstance().javdb_debug():
                 print(f"[-]javdb_api fetch failed: {url} {e}")
             return None
         if not page or page == 404:
@@ -232,7 +232,7 @@ class JavdbApi(Parser):
                     continue
                 # 命中 Cloudflare 拦截页说明该镜像不可用，换下一个镜像（镜像站一般不会走 CF）
                 if any(marker in page for marker in _CF_MARKERS):
-                    if config.getInstance().debug():
+                    if config.getInstance().javdb_debug():
                         print(f"[-]javdb_api mirror blocked by CF: {base}")
                     break
                 detail = self._match_detail_url(page, number, base)

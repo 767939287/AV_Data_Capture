@@ -1090,6 +1090,45 @@ class Config:
         return self.conf.get("cc_convert", "vars",
             fallback="actor,director,label,outline,series,studio,tag,title")
 
+    def javdb_debug(self) -> bool:
+        """javdb 系日志独立开关（[javdb] debug）。
+
+        1/true/yes/on = 打印 javdb 相关日志（站点失败明细、通道降级、请求异常）；
+        0/false/no/off = 静默；
+        留空或删除该键时跟随 [debug_mode] switch，保持升级前的日志行为。
+        注意：只影响 javdb 相关日志，不影响其它模块的 debug 输出。
+        """
+        try:
+            raw = str(self.conf.get("javdb", "debug", fallback="") or "").strip().lower()
+        except Exception:
+            raw = ""
+        if raw in ("1", "true", "yes", "on"):
+            return True
+        if raw in ("0", "false", "no", "off"):
+            return False
+        try:
+            return self.debug()
+        except Exception:
+            return False
+
+    def javdb_tls_impersonate(self) -> str:
+        """[javdb] tls_impersonate：curl_cffi 的浏览器指纹名（TLS 伪装）。
+
+          - 留空：默认 chrome150
+          - off / 0 / false / no：关闭（回退 cloudscraper + Accept: */*）
+          - 其他值：直接作为 curl_cffi 的 impersonate 名（chrome150 / chrome152 /
+                    chrome136 / chrome131 / firefox133 / safari17_2_ios ...）
+        为什么需要：javdb 对「声明 HTML」的请求会跳 /login，requests 补头无效；
+        curl_cffi 把 TLS 指纹伪装成真浏览器后可正常返回搜索页。
+        """
+        try:
+            raw = (self.conf.get("javdb", "tls_impersonate", fallback="") or "").strip()
+        except Exception:
+            return "chrome150"
+        if raw.lower() in ("off", "0", "false", "no", "none"):
+            return ""
+        return raw or "chrome150"
+
     def javdb_sites(self) -> str:
         """【旧写法】[javdb] sites：镜像站点编号列表（逗号分隔）。
 

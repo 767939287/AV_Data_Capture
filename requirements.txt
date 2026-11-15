@@ -18,4 +18,8 @@ MechanicalSoup
 opencc-python-reimplemented
 chardet
 cfscrape
+# TLS 指纹伪装：javdb 的「声明 HTML 就跳登录页」靠 requests 补请求头无效，
+# curl_cffi 把 TLS/JA3 指纹伪装成真 Chrome 后可正常返回搜索页（实测）。
+# 未安装时 javdb web 通道自动回退 cloudscraper + Accept: */*。
+curl-cffi>=0.16.3
 cloudscraper
