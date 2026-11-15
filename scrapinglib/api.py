@@ -55,6 +55,8 @@ class Scraping:
 
     dbcookies = None
     dbsite = None
+    # javdb web 通道的站点候选顺序 [(host, cookie_key), ...]（原站优先），用于失败换站
+    dbsites = None
     # 使用storyline方法进一步获取故事情节
     morestoryline = False
     # 新增方法：根据爬虫名称加载对应cookie
@@ -80,7 +82,7 @@ class Scraping:
         
     def search(self, number, sources=None, proxies=None, verify=None, type='adult',
                specifiedSource=None, specifiedUrl=None,
-               dbcookies=None, dbsite=None, morestoryline=False,
+               dbcookies=None, dbsite=None, dbsites=None, morestoryline=False,
                debug=False):
         self.debug = debug
         self.proxies = proxies
@@ -89,6 +91,7 @@ class Scraping:
         self.specifiedUrl = specifiedUrl
         self.dbcookies = dbcookies
         self.dbsite = dbsite
+        self.dbsites = dbsites
         self.morestoryline = morestoryline
         # sources 既可能是 "a,b,c" 字符串，也可能是列表；归一化后再遍历，
         # 避免字符串被按字符逐个迭代（如 "javbus" -> 'j','a','v'...）。

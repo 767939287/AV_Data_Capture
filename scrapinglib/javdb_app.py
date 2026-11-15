@@ -109,6 +109,25 @@ class JavdbApp(Parser):
         self._last_request_at = 0.0
         self._decrypt_image = True
 
+    def updateCore(self, core):
+        """ 从 core 同步请求参数，并合并 [javdb_channel] cookie（与 web/api 通道一致）
+
+        :param core: 上层刮削上下文（含 proxies/verify/dbcookies 等）
+        """
+        super().updateCore(core)
+        if core is not None and getattr(core, "dbcookies", None):
+            self.cookies = core.dbcookies.get(self.source, {'over18': '1', 'locale': 'zh'})
+        elif self.cookies is None:
+            self.cookies = {'over18': '1', 'locale': 'zh'}
+        conf = self._channel_conf()
+        if conf and conf.cookie:
+            merged = dict(self.cookies or {})
+            for pair in conf.cookie.split(';'):
+                if '=' in pair:
+                    k, v = pair.split('=', 1)
+                    merged[k.strip()] = v.strip()
+            self.cookies = merged
+
     # ------------------------------------------------------------------
     # 配置与工具
     # ------------------------------------------------------------------

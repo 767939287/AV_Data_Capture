@@ -659,28 +659,52 @@ class Config:
         return self.conf.get("priority", "website")
 
     def priority_dmm_image(self) -> bool:
-        """跨源 DMM 高清封面开关（位于 [priority] 段）。
+        """DMM 高清封面的「跨源」路径开关（已与总开关合并）。
 
-        1 开启：即使用别的刮削器(javbus/javdb 等)，也按番号去 DMM 取高清封面替换；
-        0 关闭（默认）：仅使用数据源自身封面。
+        现在统一由 [dmm_image] switch 控制：
+          1 = 无论数据源是否为 DMM/FANZA，都尝试用 DMM 高清图替换封面；
+          0 = 关闭（默认）。
+        为兼容旧配置，若 [priority] dmm_image 仍为 1，也视为开启。
         段/键缺失或非法时返回 False，保证默认行为不变。
         """
+        try:
+            if self.conf.getboolean("dmm_image", "switch", fallback=False):
+                return True
+        except Exception:
+            pass
         try:
             return self.conf.getboolean("priority", "dmm_image", fallback=False)
         except Exception:
             return False
 
     def priority_dmm_image_debug(self) -> bool:
-        """DMM 高清封面日志开关（位于 [priority] 段，键名 dmm_image_debug）。
+        """DMM 高清封面日志开关（已并入 [dmm_image] debug）。
 
         1 开启：打印 DMM 封面升级的成功结果与具体失败原因；
         0 关闭：静默（默认）。
-        未配置该键时跟随 [debug_mode] switch，保持升级前的使用习惯。
+        兼容旧配置：若 [priority] dmm_image_debug 仍存在且为 1，也视为开启。
+        两者都未配置时跟随 [debug_mode] switch，保持升级前的使用习惯。
         """
+        found = False
+        for sec, key in (("dmm_image", "debug"), ("priority", "dmm_image_debug")):
+            try:
+                if not self.conf.has_option(sec, key):
+                    continue
+            except Exception:
+                continue
+            found = True
+            try:
+                if self.conf.getboolean(sec, key):
+                    return True
+            except Exception:
+                pass
+        if found:
+            # 显式配置了但都是 0 → 明确静默，不再回退到 debug_mode
+            return False
         try:
-            return self.conf.getboolean("priority", "dmm_image_debug")
-        except Exception:
             return self.debug()
+        except Exception:
+            return False
 
     def priority_tag_source(self) -> str:
         """跨源标签来源刮削器（位于 [priority] 段，键名 tag_source）。
@@ -776,10 +800,12 @@ class Config:
         return self.conf.getboolean("direct", "switch",fallback=True)
 
     def dmm_image_switch(self) -> bool:
-        """DMM/FANZA 高清图升级开关。
+        """DMM 高清封面总开关（[dmm_image] switch，唯一开关）。
 
-        [dmm_image] switch: 1 开启（尝试把低清封面/海报替换为 DMM 高清 CDN），
-                            0 关闭（默认，行为与升级前完全一致）。
+        1 = 开启：无论当前刮削源是不是 DMM/FANZA，都尝试把封面换成 DMM 官方高清图。
+            数据源本身是 DMM 时走 upgrade_cover，其它源走跨源检索（见 scraper.py）。
+        0 = 关闭（默认，行为与升级前完全一致）。
+        旧配置 [priority] dmm_image 已被本开关合并，仍可兼容读取。
         段/键缺失或非法时返回 False，保证关闭时零副作用。
         """
         try:
@@ -831,18 +857,23 @@ class Config:
                                   CloudflareConf.DEFAULT_TIMEOUT, [], [], debug=False)
 
     def javdb_channel(self) -> "JavdbChannelConf":
-        """ 读取 [javdb_channel] 段（JavDB 三通道选择）
+        """ 读取 JavDB 三通道配置（已并入 [javdb] 段）
 
         :return: JavdbChannelConf 实例；段/键缺失或取值异常时回退 service='web' 默认配置
 
-        采用 fallback 防御式读取，保证旧 config.ini 无 [javdb_channel] 段时零副作用：
-        service='web' 时程序行为与升级前逐行等价。
+        键名：service / fallback_order / decrypt_app_image / api_mirrors / cookie。
+        兼容旧配置：若这些键仍写在旧的 [javdb_channel] 段里，会自动读旧段（优先），
+        新写法统一放在 [javdb] 段。两者都缺失时回退 service='web'，行为与升级前一致。
         """
         def _split(raw):
             # 逗号分隔列表解析：保持原样（镜像地址不做小写化），并丢弃空白项
             return [x.strip() for x in str(raw or "").split(",") if x.strip()]
         try:
-            sec = "javdb_channel"
+            # 旧段存在就用旧段（保证已升级的老配置继续生效），否则读合并后的 [javdb] 段
+            try:
+                sec = "javdb_channel" if self.conf.has_section("javdb_channel") else "javdb"
+            except Exception:
+                sec = "javdb"
             service = self.conf.get(sec, "service", fallback=JavdbChannelConf.DEFAULT_SERVICE)
             order = _split(self.conf.get(sec, "fallback_order", fallback=""))
             decrypt = self.conf.get(sec, "decrypt_app_image", fallback="1")
@@ -955,6 +986,43 @@ class Config:
         v = self.conf.getint("storyline", "show_result", fallback=0)
         return v if v in (0, 1, 2) else 2 if v > 2 else 0
 
+    def storyline_wait_all(self) -> bool:
+        """是否等所有剧情站点真正跑完再继续后续操作（[storyline] wait_all）。
+
+        1（默认）：某站点超过其整站 timeout 后不立即放弃，继续等它返回
+                  （最多再等 hard_timeout 秒），返回前确保各站点线程收尾，
+                  避免慢站点的中文简介被丢弃、日志穿插到裁图之后。
+        0         ：保持旧行为（超时即放弃该站结果）。
+        段/键缺失或取值异常时返回 True。
+        """
+        try:
+            return self.conf.getboolean("storyline", "wait_all", fallback=True)
+        except Exception:
+            return True
+
+    def storyline_hard_timeout(self) -> int:
+        """[storyline] wait_all=1 时，超时站点的额外等待上限（秒，默认 120）。
+
+        0 表示不再额外等待；非法值（负数/非数字）回退 120。
+        """
+        try:
+            v = self.conf.getint("storyline", "hard_timeout", fallback=120)
+        except Exception:
+            return 120
+        return v if v >= 0 else 120
+
+    def storyline_show_not_found(self) -> bool:
+        """是否打印「该站点没找到简介」这类空结果（[storyline] show_not_found）。
+
+        1（默认）：与旧行为一致，照常打印；
+        0         ：隐藏 number not found 行、汇总行里的「站点:空」、站点超时/异常行。
+        段/键缺失或取值异常时返回 True。
+        """
+        try:
+            return self.conf.getboolean("storyline", "show_not_found", fallback=True)
+        except Exception:
+            return True
+
     def storyline_mode(self) -> int:
         return 1 if self.conf.getint("storyline", "run_mode", fallback=1) > 0 else 0
 
@@ -1023,7 +1091,71 @@ class Config:
             fallback="actor,director,label,outline,series,studio,tag,title")
 
     def javdb_sites(self) -> str:
-        return self.conf.get("javdb", "sites", fallback="38,39")
+        """【旧写法】[javdb] sites：镜像站点编号列表（逗号分隔）。
+
+        编号 N 等价于 https://javdb<N>.com。新配置请优先用 [javdb] domains；
+        本项仍会作为 domains 之后的兜底追加（见 javdb_domains）。
+        段/键缺失或留空时返回空串（不再写死已过期的默认编号）。
+        """
+        try:
+            return self.conf.get("javdb", "sites", fallback="") or ""
+        except Exception:
+            return ""
+
+    def javdb_domains(self) -> list:
+        """JavDB web 通道的站点候选顺序：[(host, cookie_key), ...]
+
+        来源：[javdb] sites（逗号分隔，按书写顺序尝试）。每一项可写：
+          https://javdb.com      -> 原站
+          https://javdb521.com   -> 镜像（完整域名）
+          521                    -> 等价于 https://javdb521.com
+        按 host 去重保序；为空或全部非法时回退 ('javdb.com', 'javdb')。
+
+        cookie_key 用于匹配 javdb<key>.json（javdb.com -> 'javdb'，javdb521.com -> 'javdb521'）。
+        """
+        raw_sites = [x.strip() for x in str(self.javdb_sites() or "").split(",") if x.strip()]
+
+        result = []
+        seen = set()
+        for item in raw_sites:
+            host, key = self._normalize_javdb_domain(item)
+            if host and host not in seen:
+                seen.add(host)
+                result.append((host, key))
+        if not result:
+            result.append(("javdb.com", "javdb"))
+        return result
+
+    @staticmethod
+    def _normalize_javdb_domain(item: str):
+        """把一条 [javdb] 配置项归一化为 (host, cookie_key)
+
+        支持写法：
+          521                    -> ('javdb521.com', 'javdb521')
+          https://javdb521.com   -> ('javdb521.com', 'javdb521')
+          javdb.com              -> ('javdb.com', 'javdb')
+        无法识别时返回 ('', '')。
+        """
+        raw = str(item or "").strip()
+        if not raw:
+            return "", ""
+        if raw.isdigit():
+            return f"javdb{raw}.com", f"javdb{raw}"
+        host = raw
+        low = host.lower()
+        for prefix in ("https://", "http://"):
+            if low.startswith(prefix):
+                host = host[len(prefix):]
+                break
+        host = host.split("/")[0].strip().lower()
+        if not host:
+            return "", ""
+        if "." not in host:
+            # 形如 javdb / javdb521 -> 补 .com
+            host = f"{host}.com"
+        key = host[:-4] if host.endswith(".com") else host
+        key = re.sub(r"[^0-9a-zA-Z_-]+", "_", key) or "javdb"
+        return host, key
 
     def javlibrary_domain(self) -> str:
         """javlibrary 主页/CDN 域名（[javlibrary] domain）。
@@ -1228,7 +1360,12 @@ class Config:
 
         sec17 = "javdb"
         conf.add_section(sec17)
-        conf.set(sec17, "sites", "33,34")
+        conf.set(sec17, "sites", "https://javdb.com")
+        conf.set(sec17, "service", "web")
+        conf.set(sec17, "fallback_order", "app,api,web")
+        conf.set(sec17, "decrypt_app_image", "1")
+        conf.set(sec17, "api_mirrors", "")
+        conf.set(sec17, "cookie", "")
 
         sec18 = "face"
         conf.add_section(sec18)
@@ -1394,10 +1531,11 @@ class CloudflareConf():
 
 
 class JavdbChannelConf():
-    """ [javdb_channel] 段配置聚合对象
+    """ JavDB 三通道配置聚合对象（配置位于 [javdb] 段）
 
     决定 JavDB 刮削器使用哪条数据通道（web/api/app/auto）以及 auto 模式下的降级顺序。
     段/键缺失时回退到 service='web'，保证默认行为与升级前完全一致。
+    兼容旧配置：这些键若仍写在旧的 [javdb_channel] 段里，会优先读旧段。
     """
 
     SUPPORT_SERVICE = ("web", "api", "app", "auto")

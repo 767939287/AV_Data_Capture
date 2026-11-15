@@ -928,9 +928,10 @@ def core_main(movie_path, number_th, oCC, specified_source=None, specified_url=N
 
     # Return if blank dict returned (data not found)
     if not json_data:
-        # 数据源查无数据(not found)：未能进入正常刮削流程，记入无法识别列表，便于人工排查番号
+        # 数据源查无数据(not found)：未能进入正常刮削流程，记入无法识别列表，便于人工排查番号。
+        # 返回 False 让上层把它归入「未识别」，而不是误记成成功。
         record_unrecognized(movie_path)
-        return
+        return False
 
     if json_data["number"] != number:
         # fix issue #119
@@ -1161,3 +1162,6 @@ def core_main(movie_path, number_th, oCC, specified_source=None, specified_url=N
             number += part  # 这时number会被附加上CD1后缀
 
         download_subtitles(movie_path, path, multi_part, number, part, leak_word, c_word, hack_word)
+
+    # 正常完成（含整理/裁图/仅字幕模式）→ True；数据源查无数据时为 False（见函数开头）
+    return True

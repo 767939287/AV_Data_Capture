@@ -1,12 +1,26 @@
 # -*- coding: utf-8 -*-
 
 import re
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 from lxml import etree
 
 import config
 from .httprequest import request_session, get_html_by_scraper
 from .parser import Parser
+
+# javdb 对「声明要 HTML」的请求会 302 到 /login（登录墙，实测 2026-11）。
+# 声明 Accept: */* 时服务端直接吐页面，不触发登录判定，因此本通道固定使用该值。
+# 注意：cloudscraper 默认 Accept 是 text/html,...，必须显式覆盖。
+_ACCEPT_ANY = {"Accept": "*/*"}
+
+# 落地页判定结果
+_C_OK = "OK"
+_C_CF = "CF"
+_C_LOGIN = "LOGIN"
+_C_HIJACK = "HIJACK"
+_C_EMPTY = "EMPTY"
+_C_NOMATCH = "NOMATCH"
+_C_ERROR = "ERROR"
 
 
 class Javdb(Parser):
@@ -50,6 +64,10 @@ class Javdb(Parser):
         # 三通道门面：缓存子通道实现实例，避免每次 search 重复构造
         self._impl_cache = {}
         self._core = None
+        # web 通道的站点候选 [(host, cookie_key), ...]，由 core.dbsites 注入
+        self.dbsites = []
+        # 本次是否由「去除纯数字前缀」的宽松匹配命中（命中时 nfo 仍写原始番号）
+        self._number_loose = False
 
     def updateCore(self, core):
         # 保存 core 引用，供 api/app 通道在分派时重新初始化子通道使用
@@ -58,6 +76,7 @@ class Javdb(Parser):
         if core is None:
             self.cookies = {'over18': '1', 'theme': 'auto', 'locale': 'zh'}
             self.dbsite = 'javdb'
+            self._merge_channel_cookie()
             return
         if core.proxies:
             self.proxies = core.proxies
@@ -76,6 +95,21 @@ class Javdb(Parser):
             self.dbsite = core.dbsite
         else:
             self.dbsite = 'javdb'
+        # 站点候选顺序（原站优先），供失败时自动换站
+        self.dbsites = list(getattr(core, 'dbsites', None) or [])
+        self._merge_channel_cookie()
+
+    def _merge_channel_cookie(self):
+        """把 [javdb_channel] cookie 合并进当前 cookies（web/api/app 三通道统一）"""
+        conf = self._channel_conf()
+        if not conf or not conf.cookie:
+            return
+        merged = dict(self.cookies or {})
+        for pair in conf.cookie.split(';'):
+            if '=' in pair:
+                k, v = pair.split('=', 1)
+                merged[k.strip()] = v.strip()
+        self.cookies = merged
 
     # ------------------------------------------------------------------
     # 三通道门面（参考 MDCx 的 web / api / app 三通道设计）
@@ -154,28 +188,252 @@ class Javdb(Parser):
             last_result = result or 404
         return last_result
 
+    # ------------------------------------------------------------------
+    # web 通道：站点轮换 + 落地判定（原站优先，失败自动换镜像）
+    # ------------------------------------------------------------------
+    def _site_candidates(self):
+        """按顺序返回要尝试的站点 host 列表（当前 cookie 对应站点排第一）
+
+        顺序来源：[javdb] domains（原站优先）→ [javdb] sites（镜像兜底），
+        由 scraper.py 归一化后经 core.dbsites 传入；未传入时按 self.dbsite 反推。
+        """
+        candidates = []
+        seen = set()
+
+        def _add(host):
+            host = (host or "").strip().lower()
+            if host and host not in seen:
+                seen.add(host)
+                candidates.append(host)
+
+        pairs = list(getattr(self, "dbsites", None) or [])
+        for host, key in pairs:
+            if key == self.dbsite:
+                _add(host)
+        if not candidates:
+            d = (self.dbsite or "javdb").strip().lower()
+            _add(d if "." in d else f"{d}.com")
+        for host, _key in pairs:
+            _add(host)
+        return candidates
+
+    def _fetch(self, url):
+        """请求页面（固定 Accept: */*，绕开 javdb 的登录墙）
+
+        :param url: 目标 URL
+        :return: (text, final_url, status)；请求失败返回 (None, url, None)
+        """
+        try:
+            resp = get_html_by_scraper(
+                url, cookies=self.cookies, proxies=self.proxies, verify=self.verify,
+                return_type="object", extra_headers=_ACCEPT_ANY)
+        except Exception as e:
+            if config.getInstance().debug():
+                print(f'[-]javdb request failed: {url} {type(e).__name__}: {e}')
+            return None, url, None
+        if resp is None:
+            return None, url, None
+        return (resp.text or ""), (resp.url or url), resp.status_code
+
+    @staticmethod
+    def _classify(host, text, final_url, status):
+        """判定落地页类型
+
+        :param host: 本次请求期望的站点 host
+        :param text: 页面文本
+        :param final_url: 跟随重定向后的最终 URL
+        :param status: HTTP 状态码
+        :return: OK / CF / LOGIN / HIJACK / ERROR
+        """
+        if status is None or text is None:
+            return _C_ERROR
+        try:
+            fhost = (urlsplit(final_url).hostname or "").lower()
+        except Exception:
+            fhost = ""
+        # 落地域名必须是 javdb 系（防广告劫持，如 xml-v4.pushub.net）
+        if fhost and not (fhost == host or (fhost.startswith("javdb") and fhost.endswith(".com"))):
+            return _C_HIJACK
+        try:
+            path = urlsplit(final_url).path or ""
+        except Exception:
+            path = ""
+        if "/login" in path:
+            return _C_LOGIN
+        if status == 403 or "Just a moment" in text or "cf-browser-verification" in text:
+            return _C_CF
+        if status >= 400:
+            return _C_ERROR
+        return _C_OK
+
+    @staticmethod
+    def _drop_numeric_prefix(number):
+        """去掉番号前面的纯数字前缀（如 300NTK-718 -> NTK-718）
+
+        javdb 上部分作品不带纯数字前缀（300NTK-718 在站上写作 NTK-718），
+        严格匹配会一直 NOMATCH。只在剩余部分仍像番号时才返回，避免误伤：
+          - 要求前缀至少 2 位数字，且其后以字母开头并含数字
+          - 1234-5678 这类纯数字番号不会命中（去掉前缀后不以字母开头）
+
+        :param number: 原始番号
+        :return: 去前缀后的番号；不符合时返回空串
+        """
+        m = re.match(r'^\d{2,}[-_ ]?([A-Za-z][A-Za-z0-9]*[-_]?\d+.*)$', str(number or '').strip())
+        return m.group(1) if m else ''
+
+    def _pick_detail_url(self, number, urls, ids):
+        """按番号从搜索结果中挑出详情页 URL
+
+        :return: (url, matched)；未匹配返回 ('', False)
+        """
+        if not urls:
+            return "", False
+        # 欧美影片（形如 blacked.20.01.01）直接取第一条
+        if re.search(r'[a-zA-Z]+\.\d{2}\.\d{2}\.\d{2}', number):
+            self.queryid = 0
+            return urls[0], True
+        # 第一轮：只接受与番号严格对应的结果（先精确，再忽略分隔符），避免刮错
+        folded_target = re.sub(r'[-_\s]', '', number).upper()
+        for index, found in enumerate(ids):
+            if found.upper() == number.upper() or \
+                    re.sub(r'[-_\s]', '', found).upper() == folded_target:
+                self.queryid = index
+                self._number_loose = False
+                return urls[index], True
+        # 第二轮：宽松匹配——去掉纯数字前缀后再比一次（300NTK-718 -> NTK-718）
+        stripped = self._drop_numeric_prefix(number)
+        if stripped:
+            folded_strip = re.sub(r'[-_\s]', '', stripped).upper()
+            for index, found in enumerate(ids):
+                if re.sub(r'[-_\s]', '', found).upper() == folded_strip:
+                    self.queryid = index
+                    self._number_loose = True
+                    return urls[index], True
+        return "", False
+
+    def _resolve_detail(self, number):
+        """逐站点搜索并校验详情页
+
+        :return: (detail_url, search_tree, detail_page, diag)
+                 任一站点「搜索 + 详情页」都通过判定即返回；
+                 搜索能开但详情页被跳登录/广告时换下一个站点重试
+                 （对应「能搜到但打不开」的场景）。
+        """
+        diag = []
+        for host in self._site_candidates():
+            search_url = f"https://{host}/search?q={number}&f=all"
+            text, final_url, status = self._fetch(search_url)
+            kind = self._classify(host, text, final_url, status)
+            if kind != _C_OK:
+                diag.append((host, kind, final_url, status))
+                continue
+            tree = etree.fromstring(text, etree.HTMLParser())
+            candidates = self._search_candidates(tree, final_url)
+            if not candidates:
+                diag.append((host, _C_EMPTY, final_url, status))
+                continue
+            urls = [url for url, _found in candidates]
+            ids = [found for _url, found in candidates]
+            detail_url, matched = self._pick_detail_url(number, urls, ids)
+            if not matched:
+                diag.append((host, _C_NOMATCH, f"{final_url} (found: {ids[:5]})", status))
+                continue
+            dtext, dfinal, dstatus = self._fetch(detail_url)
+            dkind = self._classify(host, dtext, dfinal, dstatus)
+            if dkind != _C_OK:
+                diag.append((host, f"detail-{dkind}", dfinal, dstatus))
+                continue
+            return detail_url, tree, dtext, diag
+        return "", None, "", diag
+
+    def _format_detail(self, page):
+        """把详情页 HTML 解析为统一字段字典
+
+        :param page: 详情页 HTML 文本
+        :return: dictformat 输出的 JSON 字符串；无法处理时返回 404
+        """
+        if '此內容需要登入才能查看或操作' in page or '需要VIP權限才能訪問此內容' in page:
+            self.noauth = True
+            self.imagecut = 0
+            tree = getattr(self, "querytree", None)
+            if tree is not None:
+                return self.dictformat(tree)
+            return 404
+        htmltree = etree.fromstring(page, etree.HTMLParser())
+        return self.dictformat(htmltree)
+
+    @staticmethod
+    def _print_diag(diag):
+        """一次性打印所有站点的失败明细（替代旧实现里重复且含糊的报错）"""
+        if not diag:
+            return
+        print('[!]javdb web channel: 所有候选站点均不可用，明细如下：')
+        for host, kind, url, status in diag:
+            print(f'    - {host or "-":<18} {kind:<14} status={status} url={url}')
+        kinds = [kind for _host, kind, _url, _status in diag]
+        if any('LOGIN' in k for k in kinds):
+            print('[!]提示：LOGIN 表示请求被跳转到登录页。本通道已固定 Accept: */* 规避，')
+            print('           若仍出现，通常是该站点对你当前出口有登录/风控要求。')
+        if any('HIJACK' in k for k in kinds):
+            print('[!]提示：HIJACK 表示被跳到非 javdb 域名（广告劫持），请从 [javdb] domains 移除该站。')
+        if any('CF' in k for k in kinds):
+            print('[!]提示：CF 表示命中 Cloudflare 拦截，可临时开启 [cloudflare] switch=1。')
+
     def _search_web(self, number: str):
-        """ 原有 HTML 刮削通道（保持与升级前逐行等价）
+        """原有 HTML 刮削通道：按站点顺序尝试（原站优先），失败自动换站
 
         :param number: 番号
         :return: 统一字段字典（JSON 字符串）
         """
         self.number = number
+        # 指定 URL：直接用该页面，不再搜索
         if self.specifiedUrl:
+            host = ""
+            try:
+                host = (urlsplit(self.specifiedUrl).hostname or "").lower()
+            except Exception:
+                pass
+            text, final_url, status = self._fetch(self.specifiedUrl)
+            kind = self._classify(host, text, final_url, status)
+            if kind != _C_OK:
+                self._print_diag([(host or self.specifiedUrl, kind, final_url, status)])
+                raise Exception(f'[!] {number}: specified url unavailable ({kind})')
             self.detailurl = self.specifiedUrl
-        else:
-            self.detailurl = self.queryNumberUrl(number)
-        self.deatilpage = get_html_by_scraper(self.detailurl, cookies=self.cookies, proxies=self.proxies, verify=self.verify)
-        if '此內容需要登入才能查看或操作' in self.deatilpage or '需要VIP權限才能訪問此內容' in self.deatilpage:
-            self.noauth = True
-            self.imagecut = 0
-            result = self.dictformat(self.querytree)
-        else:
-            htmltree = etree.fromstring(self.deatilpage, etree.HTMLParser())
-            result = self.dictformat(htmltree)
-        return result
+            return self._format_detail(text)
+
+        detail_url, tree, page, diag = self._resolve_detail(number)
+        if not detail_url:
+            self._print_diag(diag)
+            # 区分「完全没搜到」与「搜到了但番号对不上」，避免误报成 no search results
+            kinds = {kind for _host, kind, _url, _status in diag}
+            if kinds and kinds.issubset({_C_NOMATCH}):
+                raise Exception(f'[!] {number}: javdb 搜到结果但番号不匹配（明细见上）')
+            raise Exception(f'[!] {number}: No search results found in javdb')
+        self.detailurl = detail_url
+        self.querytree = tree
+        self.deatilpage = page
+        return self._format_detail(page)
 
     def queryNumberUrl(self, number):
+        """返回详情页 URL（Parser 接口要求）
+
+        与 _search_web 共用逐站点搜索逻辑；全部站点失败时打印诊断明细并抛出
+        一句摘要，避免旧实现里「同一条错误被打印两遍」的问题。
+        """
+        self.number = number
+        detail_url, tree, page, diag = self._resolve_detail(number)
+        if not detail_url:
+            self._print_diag(diag)
+            raise Exception(f"No search results found in javdb ({len(diag)} site(s) tried)")
+        self.querytree = tree
+        self.deatilpage = page
+        return detail_url
+
+    def _deprecated_query_number_url(self, number):
+        """【已废弃】旧版 queryNumberUrl 实现，仅作对照保留，实际不再被调用。
+
+        保留原因：便于对比升级前的匹配规则；确认新实现稳定后可整段删除。
+        """
         javdb_url = f'https://{self.dbsite}.com/search?q={number}&f=all'
         try:
             resp = get_html_by_scraper(javdb_url, cookies=self.cookies, proxies=self.proxies, verify=self.verify, return_type="object")
@@ -325,10 +583,20 @@ class Javdb(Parser):
             self.fixstudio = True
         return r
 
+    def extradict(self, dic: dict):
+        """番号以用户文件名为准
+
+        宽松匹配（如 300NTK-718 在站上为 NTK-718）命中时，把详情页解析出的
+        站上番号改回原始番号，保证写进 .nfo / 文件名 / 目录名的番号是完整形式。
+        """
+        if getattr(self, '_number_loose', False) and getattr(self, 'number', ''):
+            dic['number'] = self.number
+        return dic
+
     def getOutline(self, htmltree):
         if self.morestoryline:
             from .storyline import getStoryline
-            return getStoryline(self.number, self.getUncensored(htmltree),
+            return getStoryline(self.number, uncensored=self.getUncensored(htmltree),
                                 proxies=self.proxies, verify=self.verify)
         return ''
 

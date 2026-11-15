@@ -10,6 +10,7 @@ import re
 import time
 import secrets
 import builtins
+import threading
 import multiprocessing
 import config
 
@@ -40,6 +41,18 @@ def is_japanese(raw: str) -> bool:
     日语简单检测
     """
     return bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF\uFF66-\uFF9F]', raw, re.UNICODE))
+
+
+def _show_not_found() -> bool:
+    """是否打印「该站点没找到简介」这类空结果日志（[storyline] show_not_found）
+
+    1（默认）= 与旧行为一致，照常打印；0 = 隐藏 number not found、汇总行的「站点:空」、
+    以及站点整体超时/执行异常行。段/键缺失或读取异常时返回 True。
+    """
+    try:
+        return config.getInstance().storyline_show_not_found()
+    except Exception:
+        return True
 
 
 class noThread(object):
@@ -99,6 +112,9 @@ def getStoryline(number, title=None, sites: list = None, uncensored=None, proxie
     if cores == 0:
         return ''
     run_mode = config.getInstance().storyline_mode()
+    wait_all = config.getInstance().storyline_wait_all()
+    hard_timeout = config.getInstance().storyline_hard_timeout()
+    show_nf = config.getInstance().storyline_show_not_found()
     if debug:
         # 明确打印实际生效的优先级顺序，便于核对 config 是否按预期生效
         print(f'[!]Storyline sites priority order: {sort_sites}')
@@ -106,10 +122,15 @@ def getStoryline(number, title=None, sites: list = None, uncensored=None, proxie
         if eff:
             print(f'[!]Storyline site total timeout: {eff}')
     if run_mode > 0:
-        results = _run_threadpool_with_total_timeout(cores, mp_args, sort_sites, site_total_timeout, debug)
+        results = _run_threadpool_with_total_timeout(cores, mp_args, sort_sites, site_total_timeout, debug,
+                                                     wait_all=wait_all, hard_timeout=hard_timeout)
     else:
         # 顺序执行(单线程)，同样对每个站点应用整站整体超时，避免某站卡死拖住后续站点。
-        results = _run_threadpool_with_total_timeout(1, mp_args, sort_sites, site_total_timeout, debug)
+        results = _run_threadpool_with_total_timeout(1, mp_args, sort_sites, site_total_timeout, debug,
+                                                     wait_all=wait_all, hard_timeout=hard_timeout)
+    if debug:
+        # 明确标记 storyline 已全部跑完，后续下载/裁图/写 nfo 从这里开始
+        print(f'[!]Storyline 完成（{len(sort_sites)}个站点已收尾），继续后续流程')
     sel = ''
 
     prefer_jp = config.getInstance().storyline_prefer_jp()
@@ -160,6 +181,9 @@ def getStoryline(number, title=None, sites: list = None, uncensored=None, proxie
                 marks.append('日文选中')
             if site == cn_site:
                 marks.append('中文选中')
+            # show_not_found=0 时隐藏「该站没找到简介」明细（有结果或已选中的照常打印）
+            if not sl and not marks and not show_nf:
+                continue
             mark = f"[{'/'.join(marks)}字数:{sl}]" if marks else (f'字数:{sl}' if sl else '空')
             s += f'，{site}{mark}'
         if debug:
@@ -183,13 +207,17 @@ def getStoryline(number, title=None, sites: list = None, uncensored=None, proxie
             sel_site, sel = site, desc
     for site, desc in zip(sort_sites, results):
         sl = len(desc) if isinstance(desc, str) else 0
+        # show_not_found=0 时隐藏空结果站点（选中的照常打印）
+        if not sl and site != sel_site and not show_nf:
+            continue
         s += f'，[选中{site}字数:{sl}]' if site == sel_site else f'，{site}字数:{sl}' if sl else f'，{site}:空'
     if debug:
         print(s)
     return sel
 
 
-def _run_threadpool_with_total_timeout(cores, mp_args, sort_sites, site_total_timeout, debug):
+def _run_threadpool_with_total_timeout(cores, mp_args, sort_sites, site_total_timeout, debug,
+                                       wait_all=True, hard_timeout=120):
     """线程池并发执行各站点，支持对每个站点分别设置“整站整体超时”(方案2)。
 
     参数:
@@ -214,8 +242,13 @@ def _run_threadpool_with_total_timeout(cores, mp_args, sort_sites, site_total_ti
         - 配了整体超时的站点：最多等 N 秒，超时则该项记 None，继续处理其它站点；
         - 未配的站点：result.get(timeout=None) 一直等其完成。
       (若用 map_async().get(timeout) 会变成等“全部任务”完成，无法按站点分别计时。)
-      注意：超时只是“不再等待”，对应线程仍在后台运行，会在完成后自然结束，
-            不影响本次 storyline 结果与程序退出。
+      wait_all=True（[storyline] wait_all=1，默认）：
+        - 某站点超过其 timeout 后不立即放弃，而是继续等它返回（最多再等 hard_timeout 秒），
+          拿到结果后照常参与日/中简介选择，避免慢站点的中文简介被丢弃；
+        - 返回前兜底等线程收尾，保证「storyline 全部完成后」才继续后续操作，
+          不会再出现站点日志穿插到裁图/NFO 写入阶段的情况。
+      wait_all=False（旧行为）：
+        - 超时即放弃该站结果；对应线程仍在后台运行，会在完成后自然结束。
     """
     # multiprocessing.pool 的 AsyncResult.get 超时抛 multiprocessing.TimeoutError，
     # 在 Python 3.11+ 其即为内建 TimeoutError，但旧版本两者不同，这里一并兼容捕获。
@@ -230,13 +263,51 @@ def _run_threadpool_with_total_timeout(cores, mp_args, sort_sites, site_total_ti
                 results[idx] = async_results[idx].get(timeout=t)  # t=None 时一直等
             except _TimeoutErrors:
                 results[idx] = None
-                if debug:
-                    print(f"[!]Storyline site '{site}' 整体超时 {t}s，放弃该站结果。")
+                if wait_all:
+                    # wait_all=1：不立即放弃，再给它 hard_timeout 秒把结果交出来，
+                    # 避免慢站点的中文简介被丢弃（旧行为会直接丢）。
+                    try:
+                        results[idx] = async_results[idx].get(timeout=hard_timeout)
+                    except _TimeoutErrors:
+                        if debug and _show_not_found():
+                            print(f"[!]Storyline site '{site}' 超过 timeout {t}s 且兜底 {hard_timeout}s 仍未返回，放弃该站结果。")
+                    except Exception as e:
+                        if debug and _show_not_found():
+                            print(f"[-]Storyline site '{site}' 执行异常: {e}")
+                else:
+                    if debug and _show_not_found():
+                        print(f"[!]Storyline site '{site}' 整体超时 {t}s，放弃该站结果。")
             except Exception as e:
                 results[idx] = None
-                if debug:
+                if debug and _show_not_found():
                     print(f"[-]Storyline site '{site}' 执行异常: {e}")
+        # 收尾：关闭任务队列并等线程跑完（带超时），保证返回时没有残留站点在跑，
+        # 后续下载/裁图/写 nfo 不会再被 storyline 日志穿插。
+        try:
+            pool.close()
+        except Exception:
+            pass
+        _join_pool(pool, hard_timeout if wait_all else 0)
     return results
+
+
+def _join_pool(pool, timeout):
+    """带超时地等待线程池收尾
+
+    线程池的 worker 是线程，无法真正 kill；close() 后 join() 会等所有已提交任务跑完。
+    为避免某站点长期无响应导致整体卡死，这里用守护线程 + 超时上限做保护。
+
+    :param pool: 已 close() 的线程池
+    :param timeout: 最长等待秒数；<=0 表示立即返回（保持旧行为）
+    """
+    if not timeout or timeout <= 0:
+        return
+    try:
+        waiter = threading.Thread(target=pool.join, daemon=True)
+        waiter.start()
+        waiter.join(int(timeout))
+    except Exception:
+        pass
 
 
 def getStoryline_mp(args):
@@ -265,12 +336,13 @@ def getStoryline_mp(args):
         storyline = getStoryline_iqqtv(number, debug, proxies, verify, timeout)
     elif site == "avsox":
         storyline = getStoryline_avsox(number, debug, proxies, verify, timeout)
-    if debug:
+    has_result = isinstance(storyline, str) and len(storyline) > 0
+    if debug and (has_result or _show_not_found()):
         print("[!]MP 线程[{}]运行{:.3f}秒，结束于{}返回结果: {}".format(
             site,
             time.time() - start_time,
             time.strftime("%H:%M:%S"),
-            storyline if isinstance(storyline, str) and len(storyline) else '[空]')
+            storyline if has_result else '[空]')
         )
     return storyline
 
@@ -290,7 +362,7 @@ def _outline_from_parser(site_name, number, debug, proxies, verify, timeout, loa
         outline = json.loads(data).get('outline') or ''
         return outline if isinstance(outline, str) else ''
     except Exception as e:
-        if debug:
+        if debug and _show_not_found():
             print(f"[-]MP getStoryline_{site_name} Error: {e}, number [{number}].")
         return ''
 
@@ -358,7 +430,7 @@ def getStoryline_avno1OLD(number, debug, proxies, verify, timeout=None):  # 获�
                 return div['data-description'].strip()
         raise ValueError(f"page number ->[{page_number}] not match")
     except Exception as e:
-        if debug:
+        if debug and _show_not_found():
             print(f"[-]MP getOutline_avno1 OLD Error: {e}, number [{number}].")
         pass
     return ''
@@ -378,7 +450,7 @@ def getStoryline_xcity(number, debug, proxies, verify, timeout=None):  # 获取�
         outline = json.loads(jsons).get('outline')
         return outline
     except Exception as e:
-        if debug:
+        if debug and _show_not_found():
             print(f"[-]MP getOutline_xcity Error: {e}, number [{number}].")
         pass
     return ''
@@ -399,7 +471,7 @@ def getStoryline_fanza(number, debug, proxies, verify, timeout=None):  # 获取�
         outline = json.loads(jsons).get('outline')
         return outline
     except Exception as e:
-        if debug:
+        if debug and _show_not_found():
             print(f"[-]MP getStoryline_fanza Error: {e}, number [{number}].")
         pass
     return ''
@@ -420,7 +492,7 @@ def getStoryline_mgstage(number, debug, proxies, verify, timeout=None):  # 获�
         outline = json.loads(jsons).get('outline')
         return outline
     except Exception as e:
-        if debug:
+        if debug and _show_not_found():
             print(f"[-]MP getStoryline_mgstage Error: {e}, number [{number}].")
         pass
     return ''

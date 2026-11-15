@@ -638,10 +638,10 @@ def _notify_result(number, movie_path, success, reason=''):
         pass
 
 
-def _notify_unknown(movie_path):
+def _notify_unknown(movie_path, reason='番号识别失败'):
     try:
         notify.record_unknown()
-        notify.notify_movie('', os.path.basename(movie_path), False, '番号识别失败')
+        notify.notify_movie('', os.path.basename(movie_path), False, reason)
     except Exception:
         pass
 
@@ -658,10 +658,14 @@ def create_data_and_move(movie_path: str, zero_op: bool, no_net_op: bool, oCC):
             return
         if n_number:
             if no_net_op:
-                core_main_no_net_op(movie_path, n_number)
+                ok = core_main_no_net_op(movie_path, n_number)
             else:
-                core_main(movie_path, n_number, oCC)
-            _notify_result(n_number, movie_path, True)
+                ok = core_main(movie_path, n_number, oCC)
+            # core_main 返回 False = 数据源查无数据（已写入 unrecognized 列表），归入「未识别」
+            if ok is False:
+                _notify_unknown(movie_path, '数据源查无数据')
+            else:
+                _notify_result(n_number, movie_path, True)
         else:
             # 番号识别失败：未能进入正常刮削流程，记入无法识别列表(与刮削失败分开)
             print("[-] number empty ERROR")
@@ -681,10 +685,14 @@ def create_data_and_move(movie_path: str, zero_op: bool, no_net_op: bool, oCC):
             return
         try:
             if no_net_op:
-                core_main_no_net_op(movie_path, n_number)
+                ok = core_main_no_net_op(movie_path, n_number)
             else:
-                core_main(movie_path, n_number, oCC)
-            _notify_result(n_number, movie_path, True)
+                ok = core_main(movie_path, n_number, oCC)
+            # core_main 返回 False = 数据源查无数据（已写入 unrecognized 列表），归入「未识别」
+            if ok is False:
+                _notify_unknown(movie_path, '数据源查无数据')
+            else:
+                _notify_result(n_number, movie_path, True)
             print("[*]======================================================")
         except Exception as err:
             print(f"[-] [{movie_path}] ERROR:")
@@ -703,8 +711,11 @@ def create_data_and_move_with_custom_number(file_path: str, custom_number, oCC, 
     try:
         print("[!] [{1}] As Number Processing for '{0}'".format(file_path, custom_number))
         if custom_number:
-            core_main(file_path, custom_number, oCC, specified_source, specified_url)
-            _notify_result(custom_number, file_path, True)
+            ok = core_main(file_path, custom_number, oCC, specified_source, specified_url)
+            if ok is False:
+                _notify_unknown(file_path, '数据源查无数据')
+            else:
+                _notify_result(custom_number, file_path, True)
         else:
             # 番号识别失败：未能进入正常刮削流程，与批量模式一致，归入无法识别列表
             print("[-] number empty ERROR")

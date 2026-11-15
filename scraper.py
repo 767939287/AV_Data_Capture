@@ -1,7 +1,6 @@
 # build-in lib
 import json
 import re
-import secrets
 import typing
 import cfscrape
 
@@ -58,16 +57,15 @@ def get_data_from_json(
         proxies = config_proxy.proxies()
 
     # javdb website logic
-    # javdb have suffix
-    javdb_sites = conf.javdb_sites().split(',')
-    for i in javdb_sites:
-        javdb_sites[javdb_sites.index(i)] = "javdb" + i
-    javdb_sites.append("javdb")
+    # 站点候选顺序（原站优先）：[javdb] domains 的完整域名 → [javdb] sites 的镜像编号兜底
+    javdb_domains = conf.javdb_domains()  # [(host, cookie_key), ...]
+    javdb_sites = [cookie_key for _host, cookie_key in javdb_domains]
     # 不加载过期的cookie，javdb登录界面显示为7天免登录，故假定cookie有效期为7天
     has_valid_cookie = False
+    javdb_site = javdb_sites[0]
     for cj in javdb_sites:
         javdb_site = cj
-        cookie_json = javdb_site + '.json'
+        cookie_json = cj + '.json'
         cookies_dict, cookies_filepath = load_cookies(cookie_json)
         if isinstance(cookies_dict, dict) and isinstance(cookies_filepath, str):
             cdays = file_modification_days(cookies_filepath)
@@ -79,8 +77,8 @@ def get_data_from_json(
                 print(
                     f'[!]Cookies file {cookies_filepath} was updated {cdays} days ago, it will not be used for HTTP requests.')
     if not has_valid_cookie:
-        # get real random site from javdb_sites, because random is not really random when the seed value is known
-        javdb_site = secrets.choice(javdb_sites)
+        # 没有有效 cookie 时也固定用候选中的第一个站点（原站优先），不再随机挑站点
+        javdb_site = javdb_sites[0]
         javdb_cookies = None
 
     ca_cert = None
@@ -100,7 +98,7 @@ def get_data_from_json(
                 print(f"[+]Source by prefix rule: '{file_number}' -> {prefix_source} (sources={sources})")
 
     json_data = search(file_number, sources, proxies=proxies, verify=ca_cert,
-                        dbsite=javdb_site, dbcookies=javdb_cookies,
+                        dbsite=javdb_site, dbcookies=javdb_cookies, dbsites=javdb_domains,
                         morestoryline=conf.is_storyline(),
                         specifiedSource=specified_source, specifiedUrl=specified_url,
                         debug = conf.debug())
@@ -178,7 +176,7 @@ def get_data_from_json(
             for src in sources_want:
                 try:
                     cross_data = search(file_number, src, proxies=proxies, verify=ca_cert,
-                                        dbsite=javdb_site, dbcookies=javdb_cookies,
+                                        dbsite=javdb_site, dbcookies=javdb_cookies, dbsites=javdb_domains,
                                         specifiedSource=src, debug=conf.debug())
                 except Exception:
                     cross_data = None

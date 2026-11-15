@@ -16,12 +16,9 @@ from lxml import etree
 import config
 from .parser import Parser
 
-# 默认镜像站列表（可通过 config.ini 的 [javdb_channel] api_mirrors 覆盖）
-DEFAULT_MIRRORS = (
-    "https://javdb573.com",
-    "https://javdb574.com",
-    "https://javdb575.com",
-)
+# 默认镜像站列表（单一来源：config.JavdbChannelConf.DEFAULT_MIRRORS）
+# 可通过 config.ini 的 [javdb] api_mirrors 覆盖
+DEFAULT_MIRRORS = tuple(config.JavdbChannelConf.DEFAULT_MIRRORS)
 
 # —— 搜索结果列表页 XPath ——
 _XPATH_LIST_ITEM = "//a[@class='box']"
