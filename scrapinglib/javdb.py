@@ -14,18 +14,29 @@ from .parser import Parser
 # cloudscraper + Accept: */*（声明 */* 不触发服务端的 JS 校验路径）。
 _ACCEPT_ANY = {"Accept": "*/*"}
 
-# 登录页内容判据（借鉴 amane）：登录表单的 action 含 user_sessions，且带密码框。
+# 登录页内容判据（借鉴 amane / mdcz）：登录表单自身的 action 地址。
 # 覆盖「状态码 200 但内容就是登录表单」的情况（URL 可能不带 /login）。
-_LOGIN_MARKERS = ("user_sessions", 'type="password"')
+# mdcz 原文：JavDB redirects FC2 and uncensored titles to its sign-in page unless
+# the cookie belongs to a signed-in account.
+_LOGIN_MARKER = 'action="/user_sessions"'
 
 # 落地页判定结果
 _C_OK = "OK"
 _C_CF = "CF"
 _C_LOGIN = "LOGIN"
 _C_HIJACK = "HIJACK"
+_C_REGION = "REGION_BLOCKED"
+_C_IPBAN = "IP_BANNED"
 _C_EMPTY = "EMPTY"
 _C_NOMATCH = "NOMATCH"
 _C_ERROR = "ERROR"
+
+# 屏蔽页判据（借鉴 mdcz 的 classifyBlockedPage）：区分「地区限制」与「IP 被封」，
+# 两者都是 200 状态的非正常页，靠文案识别。
+_BLOCK_MARKERS = (
+    (_C_REGION, "Due to copyright restrictions"),
+    (_C_IPBAN, "banned your access"),
+)
 
 
 class Javdb(Parser):
@@ -284,9 +295,13 @@ class Javdb(Parser):
             path = ""
         if "/login" in path:
             return _C_LOGIN
-        # 借鉴 amane：状态码 200 但内容是登录表单（无码条目/无码演员档案需要登录）
-        if all(marker in text for marker in _LOGIN_MARKERS):
+        # 借鉴 amane / mdcz：状态码 200 但内容是登录表单
+        if _LOGIN_MARKER in text:
             return _C_LOGIN
+        # 借鉴 mdcz：地区限制 / IP 被封（也都是 200 状态的非正常页）
+        for kind, marker in _BLOCK_MARKERS:
+            if marker in text:
+                return kind
         if status == 403 or "Just a moment" in text or "cf-browser-verification" in text:
             return _C_CF
         if status >= 400:
@@ -405,6 +420,10 @@ class Javdb(Parser):
             print('[!]提示：HIJACK 表示被跳到非 javdb 域名（广告劫持），请从 [javdb] domains 移除该站。')
         if any('CF' in k for k in kinds):
             print('[!]提示：CF 表示命中 Cloudflare 拦截，可临时开启 [cloudflare] switch=1。')
+        if any('REGION_BLOCKED' in k for k in kinds):
+            print('[!]提示：REGION_BLOCKED 表示 javdb 对你当前出口的地区限制访问（版权限制），建议换对应地区代理。')
+        if any('IP_BANNED' in k for k in kinds):
+            print('[!]提示：IP_BANNED 表示该出口 IP 已被 javdb 封禁，请换代理出口或降低请求频率。')
 
     def _search_web(self, number: str):
         """原有 HTML 刮削通道：按站点顺序尝试（原站优先），失败自动换站
