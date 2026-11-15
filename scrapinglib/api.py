@@ -109,7 +109,7 @@ class Scraping:
         self.dbsite = dbsite
         self.dbcookies = valid_cookies  # 改为字典结构存储多爬虫cookie
 
-        print(f"当前爬虫sources: {sources}")
+        print(f"[!]当前爬虫sources: {sources}")
         if type == 'adult':
             return self.searchAdult(number, sources)
         else:
