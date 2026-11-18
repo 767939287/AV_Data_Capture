@@ -162,10 +162,10 @@ def notify_movie(number, filename, success=True, reason=''):
 
     icon = '✅' if success else '❌'
     lines = [f"{icon} <b>{html.escape(str(number) or '未识别')}</b>",
-             f"文件：<code>{html.escape(str(filename))}</code>"]
+             f"📄 文件：<code>{html.escape(str(filename))}</code>"]
     if not success and reason:
-        lines.append(f"原因：{html.escape(str(reason)[:200])}")
-    lines.append(time.strftime('%Y-%m-%d %H:%M:%S'))
+        lines.append(f"❗ 原因：{html.escape(str(reason)[:200])}")
+    lines.append(f"🕒 {time.strftime('%Y-%m-%d %H:%M:%S')}")
     return _send('\n'.join(lines))
 
 
@@ -201,28 +201,29 @@ def notify_summary(duration=''):
             return False
 
         if target > 0:
-            head = (f'📊 <b>刮削全部完成</b>（{batch_total}/{target}）' if reached
+            head = (f'🎉 <b>刮削全部完成</b>（{batch_total}/{target}）' if reached
                     else f'📊 <b>刮削进度</b>（{batch_total}/{target}，第 {rounds} 轮）')
         else:
             head = f'📊 <b>刮削完成</b>（第 {rounds} 轮）'
         lines = [head,
-                 f"本轮：成功 {_stats['success']} / 失败 {_stats['failed']} / 未识别 {_stats['unknown']} / 合计 {round_total}",
-                 f"累计：成功 {_batch.get('success', 0)} / 失败 {_batch.get('failed', 0)} / "
-                 f"未识别 {_batch.get('unknown', 0)} / 合计 {batch_total}"]
+                 f"🔁 本轮：✅ 成功 {_stats['success']} / ❌ 失败 {_stats['failed']} / "
+                 f"❓ 未识别 {_stats['unknown']} / 📦 合计 {round_total}",
+                 f"🧮 累计：✅ 成功 {_batch.get('success', 0)} / ❌ 失败 {_batch.get('failed', 0)} / "
+                 f"❓ 未识别 {_batch.get('unknown', 0)} / 📦 合计 {batch_total}"]
         started = _batch.get('started_at')
         if started:
-            lines.append(f"开始：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(float(started)))}")
+            lines.append(f"🚀 开始：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(float(started)))}")
         if target > 0 and reached:
             _batch['completed'] = True
     else:
-        lines += [f"成功：{_stats['success']}",
-                  f"失败：{_stats['failed']}",
-                  f"未识别：{_stats['unknown']}",
-                  f"合计：{round_total}"]
+        lines += [f"✅ 成功：{_stats['success']}",
+                  f"❌ 失败：{_stats['failed']}",
+                  f"❓ 未识别：{_stats['unknown']}",
+                  f"📦 合计：{round_total}"]
 
     if duration:
-        lines.append(f"耗时：{html.escape(duration)}")
-    lines.append(time.strftime('%Y-%m-%d %H:%M:%S'))
+        lines.append(f"⏱️ 耗时：{html.escape(duration)}")
+    lines.append(f"🕒 {time.strftime('%Y-%m-%d %H:%M:%S')}")
     ok = _send('\n'.join(lines))
     if cumulative:
         _save_state()

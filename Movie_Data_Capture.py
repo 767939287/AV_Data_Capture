@@ -21,7 +21,7 @@ from opencc import OpenCC
 from scraper import get_data_from_json
 from ADC_function import file_modification_days, get_html, parallel_download_files
 from number_parser import get_number
-from core import core_main, core_main_no_net_op, moveFailedFolder, record_unrecognized, debug_print
+from core import core_main, core_main_no_net_op, moveFailedFolder, record_unrecognized, record_success, debug_print
 import notify
 
 
@@ -559,14 +559,18 @@ def _mapping_file_ok(path: Path) -> bool:
 def _write_list_separator(list_path) -> typing.Optional[str]:
     """在指定列表文件末尾写入一条带时间的分隔行，标记本次刮削任务开始。
 
-    失败列表(failed_list.txt) 与 无法识别列表(unrecognized_list.txt) 共用此逻辑，规则：
+    失败列表(failed_list.txt)、无法识别列表(unrecognized_list.txt) 与 成功列表(success_list.txt)
+    共用此逻辑，规则：
       - 开关由 [common] failed_list_separator 决定（默认 "===="），留空则关闭；
+      - list_path 为 None（对应列表未启用，如 success_list_path 留空）时直接返回；
       - 文件不存在或为空时不写（避免文件开头出现孤立分隔行）；
       - 若文件最后一行已是分隔行，则把该行更新时间戳（而不是再追加，避免空批次）；
       - 否则在末尾追加一行。
     本函数绝不删除任何已有内容；任何异常都被吞掉，不影响正常刮削。
     返回写入的分隔行文本；未写入时返回 None。
     """
+    if list_path is None:
+        return None
     conf = config.getInstance()
     sep = conf.failed_list_separator()
     # sep 为空字符串表示关闭自动分隔；非空时仅作为“是否启用”的开关，
@@ -615,6 +619,15 @@ def write_unrecognized_list_separator():
     return _write_list_separator(config.getInstance().unrecognized_list_file())
 
 
+def write_success_list_separator():
+    """在 success_list.txt 末尾写入本次任务的分隔行（规则见 _write_list_separator）。
+
+    成功列表默认不启用（[common] success_list_path 留空），此时返回 None、不产生任何文件；
+    启用后与 failed/unrecognized 共用 [common] failed_list_separator 开关与分隔行格式。
+    """
+    return _write_list_separator(config.getInstance().success_list_file())
+
+
 def rm_empty_folder(path):
     abspath = os.path.abspath(path)
     deleted = set()
@@ -630,7 +643,13 @@ def rm_empty_folder(path):
 
 
 def _notify_result(number, movie_path, success, reason=''):
-    """记录并推送单部结果；通知层任何异常都不影响刮削。"""
+    """记录并推送单部结果；成功列表写入与通知层的任何异常都不影响刮削。"""
+    if success:
+        # 成功列表：纯输出，未配置(success_list_path 留空)时函数内部直接返回
+        try:
+            record_success(movie_path)
+        except Exception:
+            pass
     try:
         notify.record(success)
         notify.notify_movie(number, os.path.basename(movie_path), success, reason)
@@ -866,6 +885,10 @@ def main(args: tuple) -> Path:
     sep_line = write_unrecognized_list_separator()
     if sep_line:
         print(f"[+]Unrecognized list separator: {sep_line}")
+    # 成功列表默认不启用(success_list_path 留空)，此时不会写入任何内容。
+    sep_line = write_success_list_separator()
+    if sep_line:
+        print(f"[+]Success list separator: {sep_line}")
 
     # create OpenCC converter
     ccm = conf.cc_convert_mode()

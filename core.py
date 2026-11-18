@@ -99,6 +99,42 @@ def record_unrecognized(filepath):
         pass
 
 
+def record_success(filepath):
+    """把成功处理的影片记录到成功列表([common] success_list_path)。
+
+    纯输出用途：
+      - 留空(默认)表示不启用本功能，直接返回，不生成任何文件；
+      - **不参与扫描跳过**，跳过逻辑仍由原有规则(nfo_skip_days / 成功目录 / 链接模式)决定；
+      - 追加写入文件路径，**绝不删除/覆盖已有内容**；已存在则跳过，避免重复；
+      - 任何写入异常都被吞掉，不影响正常刮削。
+    """
+    conf = config.getInstance()
+    try:
+        slist = conf.success_list_file()
+    except Exception:
+        return
+    if slist is None:
+        return
+    spath = str(slist)
+    try:
+        existing = set()
+        if os.path.isfile(spath):
+            with open(spath, 'r', encoding='utf-8') as sf:
+                existing = set(sf.read().splitlines())
+        if filepath in existing:
+            print("[+]Already in Success List file, see '%s'" % spath)
+            return
+        print("[+]Add to Success List file, see '%s'" % spath)
+        try:
+            os.makedirs(os.path.dirname(spath), exist_ok=True)
+        except Exception:
+            pass
+        with open(spath, 'a', encoding='utf-8') as sf:
+            sf.write(f'{filepath}\n')
+    except Exception:
+        pass
+
+
 def get_info(json_data):  # 返回json里的数据
     title = json_data.get('title')
     studio = json_data.get('studio')

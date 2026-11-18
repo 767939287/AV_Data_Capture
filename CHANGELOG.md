@@ -4,6 +4,18 @@
 
 ### 新增
 
+- **`[common] success_list_path` —— 成功列表（纯输出）**
+  - **留空（默认）= 不启用**：不生成任何文件，也不影响刮削流程；
+    与 `failed_list_path` / `unrecognized_list_path` 不同，**没有**回退到失败目录的默认路径。
+  - 每成功处理完一部影片，把该视频文件的完整路径追加一行；已存在则跳过，
+    绝不删除/覆盖列表已有内容（`core.record_success`）。
+  - **只输出，不参与跳过**：下次运行是否重新处理仍由原有规则决定
+    （模式1/2 文件已移走；模式3/4 看 `.nfo` 与 `nfo_skip_days`）。
+  - 启用后与另外两张表共用 `[common] failed_list_separator` 的批次分隔行。
+- **Telegram 通知补充 emoji**
+  - 单部消息：`📄 文件`、`❗ 原因`、`🕒 时间`。
+  - 汇总消息：`✅ 成功 / ❌ 失败 / ❓ 未识别 / 📦 合计 / ⏱️ 耗时 / 🚀 开始`，
+    累计模式另加 `🔁 本轮` / `🧮 累计`；达到 `cumulative_target` 时标题改为 🎉。
 - **`[cloudflare] debug` —— CF 日志独立开关**
   - `1`：打印全部 `[CF]` 日志，包括 solver-first 跳过直连、挑战后强制走 Solver、
     命中挑战/连接失败升级、cookie 复用成功、bypass 失败回退直连、TRAWL 回退 `/v1`、重试轮次。

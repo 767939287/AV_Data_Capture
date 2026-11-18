@@ -322,6 +322,18 @@ class Config:
             return Path(self.failed_folder()) / "unrecognized_list.txt"
         return p
 
+    def success_list_file(self):
+        """成功列表(success_list.txt)的最终路径（[common] success_list_path）。
+
+        单纯“输出”用：每成功处理完一部影片就追加一行文件路径，便于统计/核对。
+        **不参与扫描跳过**，是否跳过仍由原有逻辑(nfo_skip_days / 成功目录 / 链接模式)决定。
+
+        留空(默认) = **不启用本功能**：返回 None，调用方直接跳过写入，不会生成任何文件
+        （与 failed/unrecognized 不同，本项没有「回退到 failed_output_folder」的默认路径）。
+        填目录 → <目录>/success_list.txt；填 *.txt 全路径 → 直接使用该文件。
+        """
+        return self._resolve_list_path("success_list_path", "success_list.txt")
+
     def download_only_missing_images(self) -> bool:
         return self.conf.getboolean("common", "download_only_missing_images")
 
@@ -1283,6 +1295,7 @@ class Config:
         conf.set(sec1, "ignore_failed_list", "0")
         conf.set(sec1, "failed_list_path", "")
         conf.set(sec1, "unrecognized_list_path", "")
+        conf.set(sec1, "success_list_path", "")
         conf.set(sec1, "download_only_missing_images", "1")
         conf.set(sec1, "jellyfin", "0")
         conf.set(sec1, "nfo_plot_style", "cdata")
