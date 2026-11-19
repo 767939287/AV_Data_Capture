@@ -2,10 +2,11 @@ import face_recognition
 
 
 def face_center(filename, model):
+    """dlib HOG 人脸检测，返回 (center_x, top)；未检到返回 None。"""
     image = face_recognition.load_image_file(filename)
     face_locations = face_recognition.face_locations(image, 1, model)
     print('[+]Found person      [' + str(len(face_locations)) + ']      By model hog')
-    maxRight = 0
+    maxRight = -1
     maxTop = 0
     for face_location in face_locations:
         top, right, bottom, left = face_location
@@ -14,4 +15,6 @@ def face_center(filename, model):
         if x > maxRight:
             maxRight = x
             maxTop = top
-    return maxRight,maxTop
+    if maxRight < 0:
+        return None
+    return maxRight, maxTop

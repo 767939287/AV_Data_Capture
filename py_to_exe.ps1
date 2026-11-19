@@ -18,6 +18,7 @@ pyinstaller --collect-submodules "scrapinglib" `
     --collect-data "cloudscraper" `
     --collect-data "opencc" `
     --add-data "Img;Img" `
+    --add-data "ImageProcessing/models;ImageProcessing/models" `
     --add-data "config.ini;." `
     --onefile Movie_Data_Capture.py
 
