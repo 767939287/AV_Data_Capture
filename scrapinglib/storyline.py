@@ -24,14 +24,14 @@ from . import httprequest
 
 # 舍弃 Amazon 源；avno1 / 58avgo / airavwiki 已停站，保留为兼容别名（转调新源）
 G_registered_storyline_site = {"airavwiki", "airav", "avno1", "xcity", "58avgo",
-                               "fanza", "mgstage", "avbase", "iqqtv", "avsox"}
+                               "fanza", "mgstage", "avbase", "iqqtv", "avsox", "7mmtv"}
 
 # both_langs=1 时用于区分「日文简介」与「中文简介」的站点分类。
 # 以站点归类而不是靠内容检测：中文简介里常出现日文假名(人名/作品名/语气词)，
 # 用 is_japanese(desc) 判断会把中文简介误判成日文，导致中文简介被丢弃、
 # 日文与中文之间根本不会插入分隔符。
 G_jp_storyline_sites = {"fanza", "mgstage", "avbase"}
-G_cn_storyline_sites = {"airavwiki", "airav", "avno1", "xcity", "58avgo", "iqqtv", "avsox"}
+G_cn_storyline_sites = {"airavwiki", "airav", "avno1", "xcity", "58avgo", "iqqtv", "avsox", "7mmtv"}
 
 G_mode_txt = ('顺序执行', '线程池')
 
@@ -82,13 +82,13 @@ def getStoryline(number, title=None, sites: list = None, uncensored=None, proxie
         extra_sites = [s.strip() for s in config.getInstance().storyline_censored_site().split(",") if s.strip()]
     if site_list:
         # site 有值：site 顺序优先，extra_sites 只补充 site 中未出现的站点（追加到末尾）
-        storyine_sites = site_list + [s for s in extra_sites if s not in site_list]
+        storyline_sites = site_list + [s for s in extra_sites if s not in site_list]
     else:
         # site 为空：保持原行为（extra_sites 在前 + site 在后）
-        storyine_sites = extra_sites + site_list
+        storyline_sites = extra_sites + site_list
     r_dup = set()
     sort_sites = []
-    for s in storyine_sites:
+    for s in storyline_sites:
         s = s.strip()
         if s in G_registered_storyline_site and s not in r_dup:
             sort_sites.append(s)
@@ -108,7 +108,7 @@ def getStoryline(number, title=None, sites: list = None, uncensored=None, proxie
     # 用 list 而非生成器传给线程池，避免生成器+线程池潜在的顺序歧义
     mp_args = [(site, number, title, debug, proxies, verify, _site_total_timeout(site))
                for site in sort_sites]
-    cores = min(len(sort_sites), os.cpu_count())
+    cores = min(len(sort_sites), os.cpu_count() or 1)
     if cores == 0:
         return ''
     run_mode = config.getInstance().storyline_mode()
@@ -136,7 +136,7 @@ def getStoryline(number, title=None, sites: list = None, uncensored=None, proxie
     prefer_jp = config.getInstance().storyline_prefer_jp()
     both_langs = config.getInstance().storyline_both_langs()
     # 以下debug结果输出会写入日志
-    s = f'[!]Storyline{G_mode_txt[run_mode]}模式运行{len(sort_sites)}个任务共耗时(含启动开销){time.time() - start_time:.3f}秒，结束于{time.strftime("%H:%M:%S")}'
+    s = f'[!]Storyline{G_mode_txt[run_mode] if 0 <= run_mode < len(G_mode_txt) else run_mode}模式运行{len(sort_sites)}个任务共耗时(含启动开销){time.time() - start_time:.3f}秒，结束于{time.strftime("%H:%M:%S")}'
     sel_site = ''
 
     if both_langs:
@@ -336,6 +336,8 @@ def getStoryline_mp(args):
         storyline = getStoryline_iqqtv(number, debug, proxies, verify, timeout)
     elif site == "avsox":
         storyline = getStoryline_avsox(number, debug, proxies, verify, timeout)
+    elif site == "7mmtv":
+        storyline = getStoryline_7mmtv(number, debug, proxies, verify, timeout)
     has_result = isinstance(storyline, str) and len(storyline) > 0
     if debug and (has_result or _show_not_found()):
         print("[!]MP 线程[{}]运行{:.3f}秒，结束于{}返回结果: {}".format(
@@ -382,6 +384,17 @@ def getStoryline_avsox(number, debug, proxies, verify, timeout=None):
     """无码简介：avsox 的 description 字段（中文优先，缺失时回退日/英文）。"""
     from .avsox import Avsox
     return _outline_from_parser('avsox', number, debug, proxies, verify, timeout, Avsox)
+
+
+def getStoryline_7mmtv(number, debug, proxies, verify, timeout=None):
+    """中文简介：7mmtv 详情页的简介段（有码/中字/破解三页元数据一致）。"""
+    import importlib
+
+    def _loader():
+        # 模块名以数字开头，无法用 from .7mmtv import 语法，只能走 importlib
+        return importlib.import_module('.7mmtv', 'scrapinglib').Mmtv()
+
+    return _outline_from_parser('7mmtv', number, debug, proxies, verify, timeout, _loader)
 
 
 def getStoryline_58avgo(number, debug, proxies, verify, timeout=None):

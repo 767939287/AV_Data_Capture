@@ -31,5 +31,9 @@ class Tmdb(Parser):
         return movieUrl
 
     def getCover(self, htmltree):
-        return "https://www.themoviedb.org" + self.getTreeElement(htmltree, self.expr_cover)
+        url = self.getTreeElement(htmltree, self.expr_cover).strip()
+        # og:image 本身是 image.tmdb.org 绝对地址，只在相对路径时才补站点前缀
+        if url and not url.startswith('http'):
+            url = "https://www.themoviedb.org" + url
+        return url
 

@@ -9,5 +9,5 @@ services:
       - ${JAV_PATH}:/jav/data
     command:
       - python
-      - /jav/AV_Data_Capture.py
+      - /jav/Movie_Data_Capture.py
       - -a

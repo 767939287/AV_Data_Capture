@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import json
 import re
 from lxml import etree
 from urllib.parse import urljoin
@@ -77,7 +78,7 @@ class Fc2(Parser):
             try:
                 video_url = video[0].replace('\'', '')
                 video_url = 'https://adult.contents.fc2.com/api/v2/videos/' + self.number + '/sample?key=' + video_url
-                url_json = eval(self.getHtml(video_url))['path'].replace('\\', '')
+                url_json = json.loads(self.getHtml(video_url))['path'].replace('\\', '')
                 return url_json
             except:
                 return ''

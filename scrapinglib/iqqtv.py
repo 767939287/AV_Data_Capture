@@ -77,7 +77,7 @@ class Iqqtv(Parser):
         actors = [x.strip() for x in tree.xpath('//a[contains(@href,"s_type=actor")]/span/text()') if x.strip()]
         makers = [re.sub(r'\s+', ' ', x).strip() for x in tree.xpath('//a[contains(@href,"s_type=fac")]/text()')]
         studio = next((x for x in makers if x), '')
-        release = ''.join(tree.xpath('//div[class="date"]/text()')).strip()
+        release = ''.join(tree.xpath('//div[@class="date"]/text()')).strip()
         if not release:
             release = ''.join(tree.xpath('//div[contains(@class,"date")]/text()')).strip()
         release = release.replace('/', '-')

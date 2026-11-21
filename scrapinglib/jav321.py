@@ -42,11 +42,17 @@ class Jav321(Parser):
         return None
 
     def getNum(self, htmltree):
-        return super().getNum(htmltree).split(": ")[1]
+        return self._after_colon(super().getNum(htmltree))
+
+    @staticmethod
+    def _after_colon(value):
+        """取「标签: 值」冒号后的内容；没有冒号时原样返回，避免 [1] 越界。"""
+        parts = str(value or '').split(': ', 1)
+        return parts[1].strip() if len(parts) == 2 else str(value or '').strip()
 
     def getTrailer(self, htmltree):
         videourl_pather = re.compile(r'<source src=\"(.*?)\"')
-        videourl = videourl_pather.findall(self.detailhtml)
+        videourl = videourl_pather.findall(getattr(self, 'detailhtml', '') or '')
         if videourl:
             url = videourl[0].replace('awscc3001.r18.com', 'cc3001.dmm.co.jp').replace('cc3001.r18.com', 'cc3001.dmm.co.jp')
             return url
@@ -54,7 +60,7 @@ class Jav321(Parser):
             return ''
 
     def getRelease(self, htmltree):
-        return super().getRelease(htmltree).split(": ")[1]
+        return self._after_colon(super().getRelease(htmltree))
     
     def getRuntime(self, htmltree):
-        return super().getRuntime(htmltree).split(": ")[1]
+        return self._after_colon(super().getRuntime(htmltree))

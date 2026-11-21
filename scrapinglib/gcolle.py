@@ -34,12 +34,12 @@ class Gcolle(Parser):
         else:
             self.detailurl = 'https://gcolle.net/product_info.php/products_id/' + self.number
         session = request_session(cookies=self.cookies, proxies=self.proxies, verify=self.verify)
-        htmlcode = session.get(self.detailurl).text
+        htmlcode = session.get(self.detailurl, timeout=20).text
         htmltree = etree.HTML(htmlcode)
 
         r18url = self.getTreeElement(htmltree, self.expr_r18)
         if r18url and r18url.startswith('http'):
-            htmlcode = session.get(r18url).text
+            htmlcode = session.get(r18url, timeout=20).text
             htmltree = etree.HTML(htmlcode)
         result = self.dictformat(htmltree)
         return result
@@ -58,10 +58,14 @@ class Gcolle(Parser):
             return ""
 
     def getRelease(self, htmltree):
-        return re.findall(r'\d{4}-\d{2}-\d{2}', super().getRelease(htmltree))[0]
+        matched = re.findall(r'\d{4}-\d{2}-\d{2}', super().getRelease(htmltree))
+        return matched[0] if matched else ''
 
     def getCover(self, htmltree):
-        return "https:" + super().getCover(htmltree)
+        cover = super().getCover(htmltree).strip()
+        if cover and not cover.startswith('http'):
+            cover = "https:" + cover
+        return cover
 
     def getExtrafanart(self, htmltree):
         extrafanart = self.getTreeAll(htmltree, self.expr_extrafanart)

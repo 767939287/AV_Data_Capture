@@ -133,11 +133,13 @@ class Parser:
         if eff_timeout is not None:
             kwargs["timeout"] = eff_timeout
         resp = httprequest.get(url, cookies=self.cookies, proxies=self.proxies, extra_headers=self.extraheader, verify=self.verify, return_type=type, retry=retry, **kwargs)
-        if '<title>404 Page Not Found' in resp \
-                or '<title>未找到页面' in resp \
-                or '404 Not Found' in resp \
-                or '<title>404' in resp \
-                or '<title>お探しの商品が見つかりません' in resp:
+        # return_type='object' 时 resp 是 Response 对象，不能对其做字符串 in 判断
+        if isinstance(resp, str) and (
+                '<title>404 Page Not Found' in resp
+                or '<title>未找到页面' in resp
+                or '404 Not Found' in resp
+                or '<title>404' in resp
+                or '<title>お探しの商品が見つかりません' in resp):
             return 404
         return resp
 
@@ -151,11 +153,12 @@ class Parser:
         if eff_timeout is not None:
             kwargs["timeout"] = eff_timeout
         resp = httprequest.get_html_by_scraper(url, cookies=self.cookies, proxies=self.proxies, verify=self.verify, return_type=type, retry=retry, **kwargs)
-        if '<title>404 Page Not Found' in resp \
-                or '<title>未找到页面' in resp \
-                or '404 Not Found' in resp \
-                or '<title>404' in resp \
-                or '<title>お探しの商品が見つかりません' in resp:
+        if isinstance(resp, str) and (
+                '<title>404 Page Not Found' in resp
+                or '<title>未找到页面' in resp
+                or '404 Not Found' in resp
+                or '<title>404' in resp
+                or '<title>お探しの商品が見つかりません' in resp):
             return 404
         return resp
 

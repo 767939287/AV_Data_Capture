@@ -6,9 +6,6 @@ def face_center(filename, model):
     app_id = config.getInstance().conf.get("face", "appid")
     api_key = config.getInstance().conf.get("face", "key")
     app_secret = config.getInstance().conf.get("face", "secret")
-    app_id="31706772"
-    api_key="n612hyIb9jdSfuSmZiRK4lko"
-    app_secret="s6eIWbLFI8fsGbe1sz5dp5YKFBq2Cctu"
     client = AipFace(app_id, api_key, app_secret)
     with open(filename, 'rb') as fp:
         base64_data = base64.b64encode(fp.read())
@@ -18,13 +15,19 @@ def face_center(filename, model):
     result = result['result']
     print('[+]Found face      ' + str(result['face_num']))
     # 
+    found = False
     maxRight = 0
     maxTop = 0
     for face in result["face_list"]:
-        left = int(face['location']['left'])
-        top = int(face['location']['top'])
-        width = int(face['location']['width'])
-        if left+width > maxRight:
-            maxRight = left+width
+        location = face.get('location') or {}
+        left = int(location.get('left', 0))
+        top = int(location.get('top', 0))
+        width = int(location.get('width', 0))
+        if not found or left + width > maxRight:
+            maxRight = left + width
             maxTop = top
-    return maxRight,maxTop
+            found = True
+    # 未检到人脸时必须返回 None（0 是合法坐标），与 hog/yunet 保持一致
+    if not found:
+        return None
+    return maxRight, maxTop

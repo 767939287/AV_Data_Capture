@@ -66,7 +66,10 @@ def get_number(debug: bool, file_path: str) -> str:
                 filename = lower_check.replace('--', '-').replace('_', '-').upper()
             filename = re.sub(r"[-_]cd\d{1,2}", "", filename, flags=re.IGNORECASE)
             if not re.search("-|_", filename): # 去掉-CD1之后再无-的情况，例如n1012-CD1.wmv
-                return str(re.search(r'\w+', filename[:filename.find('.')], re.A).group())
+                dot = filename.find('.')
+                head = filename if dot < 0 else filename[:dot]
+                matched_word = re.search(r'\w+', head, re.A)
+                return matched_word.group() if matched_word else head
             file_number =  os.path.splitext(filename)
             filename = re.search(r'[\w\-]{2,}', file_number[0], re.A)
             if filename:

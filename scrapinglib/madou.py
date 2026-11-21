@@ -35,7 +35,15 @@ def change_number(number):
         m = re.search(rules, number, re.I)
         if m:
             return (m.group('eng'),m.group('num').zfill(2),m.group('part'))
-    return number.split('-')
+    # 规则未命中时也必须返回 3 元组：调用方按 n1, n2, n3 = change_number(...) 解包，
+    # 原先直接 return number.split('-') 会因元组长度不符抛 ValueError。
+    parts = number.split('-')
+    if len(parts) >= 2:
+        return (parts[0], parts[1], '-'.join(parts[2:]) or None)
+    matched = re.match(r'^([a-z]+)(\d+)(.*)$', number, re.I)
+    if matched:
+        return (matched.group(1), matched.group(2), matched.group(3) or None)
+    return (number, '', None)
 
 
 
@@ -57,8 +65,6 @@ class Madou(Parser):
     def search(self, number):
         n1, n2, n3 = change_number(number)
         number = n1.replace('-','') + n2 + (n3 or '')
-        if self.number!=number:
-            print(self.number)
         if self.specifiedUrl:
             self.detailurl = self.specifiedUrl
         else:
@@ -92,8 +98,8 @@ class Madou(Parser):
         # <title>MD0094／贫嘴贱舌中出大嫂／坏嫂嫂和小叔偷腥内射受孕-麻豆社</title>
         # <title>TM0002-我的痴女女友-麻豆社</title>
         browser_title = str(super().getTitle(htmltree))
-        title = str(re.findall(r'^[A-Z0-9 ///\-]*(.*)-麻豆社$', browser_title)[0]).strip()
-        return title
+        matched = re.findall(r'^[A-Z0-9 ///\-]*(.*)-麻豆社$', browser_title)
+        return (matched[0] if matched else browser_title).strip()
 
     def getCover(self, htmltree):
         try:

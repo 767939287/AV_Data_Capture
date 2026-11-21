@@ -166,8 +166,9 @@ class Avsox(Parser):
             'director': self._named(movie.get('director'), 'director'),
             'actor': actors,
             'actor_photo': actor_photo,
-            'cover': movie.get('posterSmall') or '',
-            'cover_small': movie.get('posterLarge') or '',
+            # cover 用大图、cover_small 用小图（原先两者写反）
+            'cover': movie.get('posterLarge') or movie.get('posterSmall') or '',
+            'cover_small': movie.get('posterSmall') or '',
             'extrafanart': [u for u in (movie.get('sampleLarge') or []) if isinstance(u, str) and u],
             'trailer': '',
             'tag': [self._named(genre, 'genre') for genre in (movie.get('genre') or [])

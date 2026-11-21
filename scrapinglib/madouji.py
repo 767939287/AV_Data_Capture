@@ -56,8 +56,6 @@ class Madouji(Parser):
             self.detailurl = self.specifiedUrl
         else:
             number = ''.join(item for item in change_number(number) if item)
-            if self.number != number:
-                print(number)
             self.detailurl = self.queryNumberUrl(number)
         if self.detailurl == None:
             return 404

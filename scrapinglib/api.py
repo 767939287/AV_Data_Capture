@@ -35,13 +35,18 @@ def getSupportedSources(tag='adult'):
         return ','.join(sc.general_full_sources)
 
 
+# 模块名以数字开头的源无法用 str.capitalize() 推出类名（"7mmtv".capitalize() == "7mmtv"），
+# 这里显式映射到实际类名。
+SOURCE_CLASS_NAMES = {'7mmtv': 'Mmtv'}
+
+
 class Scraping:
     """
     """
     adult_full_sources = ['javlibrary', 'javdb', 'javbus', 'airav', 'fanza', 'xcity', 'jav321',
                           'mgstage', 'fc2', 'avsox', 'dlsite', 'carib', 'madou', 'msin',
                           'getchu', 'gcolle', 'javday', 'pissplay', 'javmenu', 'pcolle', 'caribpr','madouji',
-                          'freejavbt', 'iqqtv', 'avbase', 'dahlia', 'faleno', 'kin8', 'giga'
+                          'freejavbt', 'iqqtv', 'avbase', 'dahlia', 'faleno', 'kin8', 'giga', '7mmtv'
                           ]
 
     general_full_sources = ['tmdb', 'imdb']
@@ -131,7 +136,7 @@ class Scraping:
                     print('[+]select', source)
                 try:
                     module = importlib.import_module('.' + source, 'scrapinglib')
-                    parser_type = getattr(module, source.capitalize())
+                    parser_type = getattr(module, SOURCE_CLASS_NAMES.get(source) or source.capitalize())
                     parser: Parser = parser_type()
                     data = parser.scrape(name, self)
                     if data == 404:
@@ -177,7 +182,7 @@ class Scraping:
                     print('[+]select', source)
                 try:
                     module = importlib.import_module('.' + source, 'scrapinglib')
-                    parser_type = getattr(module, source.capitalize())
+                    parser_type = getattr(module, SOURCE_CLASS_NAMES.get(source) or source.capitalize())
                     parser: Parser = parser_type()
                     data = parser.scrape(number, self)
                     if data == 404:

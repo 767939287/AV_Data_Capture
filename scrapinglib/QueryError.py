@@ -3,4 +3,5 @@ class QueryError(Exception):
     """JavDB查询异常基类"""
     def __init__(self, number, message):
         self.number = number
+        self.message = message
         super().__init__(f"[{number}] {message}")

@@ -59,7 +59,7 @@ class Logger:
         elif level == "FATAL":
             self.min_level = FATAL
         else:
-            print(("log level not support:%s", level))
+            print("log level not support:%s" % level)
 
     def set_color(self):
         self.err_color = None
@@ -150,6 +150,11 @@ class Logger:
             self.log_to_file(level, console_color, fmt, *args, **kwargs)
 
             if self.buffer_size:
+                # string 是 log_to_file 的局部变量，此处必须自行格式化，否则 NameError
+                try:
+                    string = fmt % args
+                except Exception:
+                    string = str(fmt)
                 self.last_no += 1
                 self.buffer[self.last_no] = string
                 buffer_len = len(self.buffer)
@@ -270,8 +275,6 @@ def getLogger(name=None, buffer_size=0, file_name=None, roll_num=1):
 
     if not isinstance(name, str):
         raise TypeError('A logger name must be string or Unicode')
-    if isinstance(name, bytes):
-        name = name.encode('utf-8')
 
     if name in loggerDict:
         return loggerDict[name]

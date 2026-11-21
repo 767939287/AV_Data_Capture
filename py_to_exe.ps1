@@ -13,6 +13,7 @@ mkdir __pycache__
 
 
 pyinstaller --collect-submodules "scrapinglib" `
+    --hidden-import "scrapinglib.7mmtv" `
     --collect-submodules "ImageProcessing" `
     --collect-data "face_recognition_models" `
     --collect-data "cloudscraper" `

@@ -31,7 +31,7 @@ class Pcolle(Parser):
         self.number = number.upper().replace('PCOLLE-', '')
         self.detailurl = 'https://www.pcolle.com/product/detail/?product_id=' + self.number
         session = request_session(cookies=self.cookies, proxies=self.proxies, verify=self.verify)
-        htmlcode = session.get(self.detailurl).text
+        htmlcode = session.get(self.detailurl, timeout=20).text
         htmltree = etree.HTML(htmlcode)
         result = self.dictformat(htmltree)
         return result

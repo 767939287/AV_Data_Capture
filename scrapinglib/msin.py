@@ -34,7 +34,7 @@ class Msin(Parser):
         self.cookies = {"age": "off"}
         self.detailurl = 'https://db.msin.jp/search/movie?str=fc2-ppv-' + self.number
         session = request_session(cookies=self.cookies, proxies=self.proxies, verify=self.verify)
-        htmlcode = session.get(self.detailurl).text
+        htmlcode = session.get(self.detailurl, timeout=20).text
         htmltree = etree.HTML(htmlcode)
         # if title are null, use unsubscribe title
         if super().getTitle(htmltree) == "":

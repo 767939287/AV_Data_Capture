@@ -58,6 +58,9 @@ class Dlsite(Parser):
                         number = number.replace('上巻', '').replace('下巻', '').replace('前編', '').replace('後編', '')
                         htmltree = self.getHtmlTree(f'https://www.dlsite.com/maniax/fsr/=/language/jp/sex_category/male/keyword/{number}/order/trend/work_type_category/movie')
                         search_result = self.getTreeAll(htmltree, '//*[@id="search_result_img_box"]/li[1]/dl/dd[2]/div[2]/a/@href')
+            # 四轮重试都为空时不能再索引，否则 IndexError 打穿整次刮削
+            if len(search_result) == 0:
+                return 404
             self.detailurl = search_result[0]
             htmltree = self.getHtmlTree(self.detailurl)
             self.number = str(re.findall(r"\wJ\w+", self.detailurl)).strip(" ['']")
@@ -70,8 +73,13 @@ class Dlsite(Parser):
 
     def getTitle(self, htmltree):
         result = super().getTitle(htmltree)
-        result = result[:result.rfind(' | DLsite')]
-        result = result[:result.rfind(' [')]
+        # rfind 未命中返回 -1，直接切片会砍掉最后一个字符
+        idx = result.rfind(' | DLsite')
+        if idx >= 0:
+            result = result[:idx]
+        idx = result.rfind(' [')
+        if idx >= 0:
+            result = result[:idx]
         if 'OFF】' in result:
             result = result[result.find('】')+1:]
         result = result.replace('【HD版】', '')
@@ -92,7 +100,7 @@ class Dlsite(Parser):
     def getExtrafanart(self, htmltree):
         try:
             result = []
-            for i in self.getTreeAll(self.expr_extrafanart):
+            for i in self.getTreeAll(htmltree, self.expr_extrafanart):
                 result.append("https:" + i)
         except:
             result = ''

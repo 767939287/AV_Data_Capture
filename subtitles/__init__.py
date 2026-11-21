@@ -8,6 +8,9 @@ headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
         }
 
+# 字幕站请求超时（秒）；原代码未设 timeout，网络异常时可能无限期挂起
+G_SUB_TIMEOUT = 20
+
 
 def download_subtitles(filepath, path, multi_part, number, part, leak_word, c_word, hack_word) -> bool:
     number = re.sub(r'-CD\d+$', '', number)
@@ -17,9 +20,9 @@ def download_subtitles(filepath, path, multi_part, number, part, leak_word, c_wo
         config_proxy = config.getInstance().proxy()
         if config_proxy.enable:
             proxies = config_proxy.proxies()
-            response = requests.get(search_url, headers=headers, proxies=proxies)
+            response = requests.get(search_url, headers=headers, proxies=proxies, timeout=G_SUB_TIMEOUT)
         else:
-            response = requests.get(search_url, headers=headers)
+            response = requests.get(search_url, headers=headers, timeout=G_SUB_TIMEOUT)
         print(f"搜索URL: {search_url}, 状态码: {response.status_code}")
         if response.status_code != 200:
             return False
@@ -58,9 +61,9 @@ def open_download(subtitle_link,path,number,leak_word,c_word,hack_word, done_lan
     if config_proxy.enable:
         proxies = config_proxy.proxies()
 
-        subtitle_response = requests.get(subtitle_page_url, headers=headers, proxies=proxies,verify=False)
+        subtitle_response = requests.get(subtitle_page_url, headers=headers, proxies=proxies,verify=False, timeout=G_SUB_TIMEOUT)
     else:
-        subtitle_response = requests.get(subtitle_page_url, headers=headers,verify=False)
+        subtitle_response = requests.get(subtitle_page_url, headers=headers,verify=False, timeout=G_SUB_TIMEOUT)
 
     print(f"访问字幕页面: {subtitle_page_url}, 状态码: {subtitle_response.status_code}")
     if subtitle_response.status_code != 200:
@@ -134,11 +137,11 @@ def _download_one(subtitle_page_url, download_link, path, number, leak_word, c_w
         if config_proxy.enable:
             proxies = config_proxy.proxies()
             subtitle_response = requests.get(subtitle_download_url, headers=dl_headers, proxies=proxies,
-                                             verify=False)
+                                             verify=False, timeout=G_SUB_TIMEOUT)
         else:
             # 修复：原先此处误用了 subtitle_page_url，导致请求到的是详情页而非下载链接，
             # 加上站点防盗链时就会返回 404 页面内容。
-            subtitle_response = requests.get(subtitle_download_url, headers=dl_headers, verify=False)
+            subtitle_response = requests.get(subtitle_download_url, headers=dl_headers, verify=False, timeout=G_SUB_TIMEOUT)
     except Exception as e:
         print(f"下载字幕出错: {subtitle_download_url}, 错误: {e}")
         return False

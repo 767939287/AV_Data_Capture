@@ -14,12 +14,20 @@ def face_center(filename, model):
         raise ValueError(result['error_msg'])
     print('[+]Found person      ' + str(result['person_num']))
     # 中心点取鼻子x坐标
+    found = False
     maxRight = 0
     maxTop = 0
     for person_info in result["person_info"]:
-        x = int(person_info['body_parts']['nose']['x'])
+        nose = (person_info.get('body_parts') or {}).get('nose') or {}
+        if not nose:
+            continue
+        x = int(nose['x'])
         top = int(person_info['location']['top'])
-        if x > maxRight:
+        if not found or x > maxRight:
             maxRight = x
             maxTop = top
-    return maxRight,maxTop
+            found = True
+    # 未检到人时必须返回 None（0 是合法坐标），与 hog/yunet 保持一致
+    if not found:
+        return None
+    return maxRight, maxTop

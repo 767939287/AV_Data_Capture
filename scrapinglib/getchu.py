@@ -16,16 +16,17 @@ class Getchu():
         www = wwwGetchu()
         number = number.replace("-C", "")
         dic = {}
+        # 直接按顺序调用，避免用 eval 执行拼出来的代码串
         if "item" in number:
-            sort = ["dl.scrape(number, core)", "www.scrape(number, core)"]
+            engines = [dl, www]
         else:
-            sort = ["www.scrape(number, core)", "dl.scrape(number, core)"]
-        for i in sort:
+            engines = [www, dl]
+        for engine in engines:
             try:
-                dic = eval(i)
-                if dic != None and json.loads(dic).get('title') != '':
+                dic = engine.scrape(number, core)
+                if dic is not None and json.loads(dic).get('title') != '':
                     break
-            except:
+            except Exception:
                 pass
         return dic
 
@@ -58,6 +59,7 @@ class wwwGetchu(Parser):
             queryUrl = self.GETCHU_WWW_SEARCH_URL.replace("_WORD_", quote(number, encoding="euc_jp"))
         # NOTE dont know why will try 2 times
         retry = 2
+        detailurl = ''
         for i in range(retry):
             queryTree = self.getHtmlTree(queryUrl)
             detailurl = self.getTreeElement(queryTree, '//*[@id="detail_block"]/div/table/tr[1]/td/a[1]/@href')

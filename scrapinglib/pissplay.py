@@ -53,16 +53,18 @@ class Pissplay(Parser):
 
     def getRelease(self, htmltree):
         releaseDate = super().getRelease(htmltree)
-        isoData = datetime.strptime(releaseDate, '%d %b %Y').strftime('%Y-%m-%d')
-        return isoData
+        try:
+            return datetime.strptime(releaseDate, '%d %b %Y').strftime('%Y-%m-%d')
+        except (ValueError, TypeError):
+            return ''
     
     def getStudio(self, htmltree):
         return 'PissPlay'
     
     def getTags(self, htmltree):
         tags = self.getTreeAll(htmltree, self.expr_tags)
-        if 'Guests' in tags:
-            if tags[0] == 'Collaboration' or tags[0] == 'Toilet for a Day' or tags[0] == 'Collaboration':
+        if 'Guests' in tags and tags:
+            if tags[0] in ('Collaboration', 'Toilet for a Day') and len(tags) > 1:
                 del tags[1]
             else:
                 tags = tags[1:]
@@ -70,13 +72,11 @@ class Pissplay(Parser):
     
     def getActors(self, htmltree) -> list:
         tags = self.getTreeAll(htmltree, self.expr_tags)
-        if 'Guests' in tags:
-            if tags[0] == 'Collaboration' or tags[0] == 'Toilet for a Day' or tags[0] == 'Collaboration':
+        if 'Guests' in tags and tags:
+            if tags[0] in ('Collaboration', 'Toilet for a Day') and len(tags) > 1:
                 return [tags[1]]
-            else:
-                return [tags[0]]
-        else:
-            return ['Bruce and Morgan']
+            return [tags[0]]
+        return ['Bruce and Morgan']
     
     def getOutline(self, htmltree):
         outline = self.getTreeAll(htmltree, self.expr_outline)

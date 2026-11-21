@@ -1,5 +1,6 @@
 requests
 dlib-bin
+face-recognition
 Click
 numpy
 face-recognition-models
@@ -22,7 +23,6 @@ cfscrape
 # curl_cffi 把 TLS/JA3 指纹伪装成真 Chrome 后可正常返回搜索页（实测）。
 # 未安装时 javdb web 通道自动回退 cloudscraper + Accept: */*。
 curl-cffi>=0.16.3
-cloudscraper
 # 人脸检测（YuNet）：opencv-python-headless 提供 cv2.FaceDetectorYN，
 # 不需要 GUI 库，容器/服务器可直接安装。模型文件已随仓库提供，无需联网。
 opencv-python-headless>=4.10

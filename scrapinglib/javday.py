@@ -27,8 +27,6 @@ class Javday(Parser):
             self.detailurl = self.specifiedUrl
         else:
             number = "".join(item for item in change_number(number) if item).replace('-','').upper()
-            if self.number!=number:
-                print(number)
             self.detailurl = "https://javday.tv/videos/" + number + "/"
         self.htmlcode = self.getHtml(self.detailurl)
         if self.htmlcode == 404:
@@ -43,10 +41,9 @@ class Javday(Parser):
         title = super().getTitle(htmltree)
         # 删除番号和网站名
         try:
-            title = str(re.sub(r"^[\w\-]+",'',title,1))
-            title = str(re.sub(r"[\w\.\-]+$",'',title,1))
+            title = str(re.sub(r"^[A-Za-z0-9_\-]+",'',title,1))
+            title = str(re.sub(r"[A-Za-z0-9_\.\-]+$",'',title,1))
         except:
-            print("非标准标题" + title)
             title = title.replace(self.number,"")
             title = title.replace("JAVDAY.TV","")
         return title.strip("- ")
