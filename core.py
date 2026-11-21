@@ -223,7 +223,9 @@ def download_file_with_filename(url, filename, path, filepath, json_headers=None
                     print(f"[-]Fatal error! Can not make folder '{path}'")
                     os._exit(0)
             r = get_html(url=url, return_type='content', json_headers=json_headers)
-            if r == '':
+            # get_html(return_type='content') 返回 bytes，空响应是 b''；
+            # 用 `r == ''` 永远不成立，会把 0 字节写盘并留下空图片文件。
+            if not r:
                 print('[-]Movie Download Data not found!')
                 return
             fullpath = os.path.join(path, filename)
@@ -405,6 +407,13 @@ def image_download(cover, fanart_path, thumb_path, path, filepath, json_headers=
         else:
             break
     if file_not_exist_or_empty(full_filepath):
+        # 下载失败：清掉残留的 0 字节文件，避免后续裁剪/水印报错，
+        # 也避免下次被 download_only_missing_images 当成「已有图片」复用。
+        try:
+            if os.path.isfile(full_filepath) and os.path.getsize(full_filepath) == 0:
+                os.remove(full_filepath)
+        except OSError:
+            pass
         return
     print('[+]Image Downloaded!', Path(full_filepath).name)
     if not config.getInstance().jellyfin():

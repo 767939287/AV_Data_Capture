@@ -390,7 +390,8 @@ def _graphql_to_dict(number: str, cid: str, content: dict) -> dict:
         "director": directors[0] if directors else "",
         "actor": [a.get("name") for a in content.get("actresses") or [] if a.get("name")],
         "actor_photo": {},
-        "cover": package.get("largeUrl") or "",
+        # 素人条目只有 mediumUrl（jp.jpg），largeUrl 为 null，必须回退
+        "cover": package.get("largeUrl") or package.get("mediumUrl") or "",
         "cover_small": package.get("mediumUrl") or "",
         "extrafanart": samples,
         "trailer": (content.get("sample2DMovie") or {}).get("highestMovieUrl") or "",

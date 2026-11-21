@@ -83,6 +83,11 @@ def cutImage(imagecut, path, thumb_path, poster_path, skip_facerec=False):
         return
     # imagecut为4时同时也是有码影片 也用人脸识别裁剪封面
     if imagecut == 1 or imagecut == 4:  # 剪裁大封面
+        if file_not_exist_or_empty(fullpath_fanart):
+            # 封面缺失或为 0 字节（下载失败残留）：跳过裁剪，避免 Pillow 抛
+            # 'cannot identify image file'，日志里只留一条可读提示。
+            print(f'[-]Cover cut skipped: {Path(fullpath_fanart).name} missing or empty')
+            return
         try:
             img = Image.open(fullpath_fanart)
             width, height = img.size

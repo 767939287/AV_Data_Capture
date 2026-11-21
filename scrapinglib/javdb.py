@@ -14,11 +14,42 @@ from .parser import Parser
 # cloudscraper + Accept: */*（声明 */* 不触发服务端的 JS 校验路径）。
 _ACCEPT_ANY = {"Accept": "*/*"}
 
-# 登录页内容判据（借鉴 amane / mdcz）：登录表单自身的 action 地址。
-# 覆盖「状态码 200 但内容就是登录表单」的情况（URL 可能不带 /login）。
+# 登录页内容判据（借鉴 amane / mdcz）。
 # mdcz 原文：JavDB redirects FC2 and uncensored titles to its sign-in page unless
 # the cookie belongs to a signed-in account.
 _LOGIN_MARKER = 'action="/user_sessions"'
+# 注意：正常页面的导航里也内嵌了同一份登录表单（modal），只判 action 会把正常页误杀。
+# amane 的精确判据是「整页渲染的登录表单」：含密码框，且祖先里没有 modal。
+_LOGIN_FULL_PAGE_FORM = (
+    '//form[contains(@class,"auth-view")]'
+    '[.//input[@type="password"]]'
+    '[not(ancestor::div[contains(@class,"modal")])]'
+)
+# 兜底判据用到的「这是内容页」特征：含登录表单 action 但整页没有任何影片特征时才算登录墙。
+_CONTENT_MARKERS = ('copy-to-clipboard', 'video-title', 'movie-list', 'column-video-cover')
+
+
+def _is_login_page(text: str) -> bool:
+    """判断页面是否为登录墙（状态码 200、内容却是登录表单）。
+
+    精确判据（amane）：整页渲染的 auth-view 登录表单，且不在 modal 内。
+    兜底判据：含登录表单 action，且整页找不到任何影片特征元素。
+    """
+    if not text:
+        return False
+    try:
+        tree = etree.HTML(text)
+    except Exception:
+        tree = None
+    if tree is not None:
+        try:
+            if tree.xpath(_LOGIN_FULL_PAGE_FORM):
+                return True
+        except Exception:
+            pass
+    if _LOGIN_MARKER in text:
+        return not any(marker in text for marker in _CONTENT_MARKERS)
+    return False
 
 # 落地页判定结果
 _C_OK = "OK"
@@ -295,8 +326,8 @@ class Javdb(Parser):
             path = ""
         if "/login" in path:
             return _C_LOGIN
-        # 借鉴 amane / mdcz：状态码 200 但内容是登录表单
-        if _LOGIN_MARKER in text:
+        # 借鉴 amane：只认「整页渲染的登录表单」，导航模态框里的同一份表单不算
+        if _is_login_page(text):
             return _C_LOGIN
         # 借鉴 mdcz：地区限制 / IP 被封（也都是 200 状态的非正常页）
         for kind, marker in _BLOCK_MARKERS:
