@@ -92,6 +92,8 @@ class Javdb(Parser):
     expr_director2 = '//strong[contains(text(),"導演")]/../span/a/text()'
     expr_cover = "//div[contains(@class, 'column-video-cover')]/a/img/@src"
     expr_cover2 = "//div[contains(@class, 'column-video-cover')]/img/@src"
+    # 新版详情页封面结构（对齐 mdcz：img.video-cover）
+    expr_cover3 = "//img[contains(@class,'video-cover')]/@src"
     expr_cover_no = '//*[contains(@class,"movie-list")]/div/a/div[contains(@class, "cover")]/img/@src'
     expr_trailer = '//span[contains(text(),"預告片")]/../../video/source/@src'
     expr_extrafanart = "//article[@class='message video-panel']/div[@class='message-body']/div[@class='tile-images preview-images']/a[contains(@href,'/samples/')]/@href"
@@ -394,7 +396,7 @@ class Javdb(Parser):
         """
         diag = []
         for host in self._site_candidates():
-            search_url = f"https://{host}/search?q={number}&f=all"
+            search_url = f"https://{host}/search?q={number}&f=all&locale=zh"
             text, final_url, status = self._fetch(search_url)
             kind = self._classify(host, text, final_url, status)
             if kind != _C_OK:
@@ -511,7 +513,7 @@ class Javdb(Parser):
 
         保留原因：便于对比升级前的匹配规则；确认新实现稳定后可整段删除。
         """
-        javdb_url = f'https://{self.dbsite}.com/search?q={number}&f=all'
+        javdb_url = f'https://{self.dbsite}.com/search?q={number}&f=all&locale=zh'
         try:
             resp = get_html_by_scraper(javdb_url, cookies=self.cookies, proxies=self.proxies, verify=self.verify, return_type="object")
         # except Exception as e:
@@ -614,7 +616,8 @@ class Javdb(Parser):
     def getCover(self, htmltree):
         if self.noauth:
             return self.getTreeElement(htmltree, self.expr_cover_no, self.queryid)
-        return super().getCover(htmltree)
+        return self.getTreeElementbyExprs(
+            htmltree, self.expr_cover, self.expr_cover2, self.expr_cover3)
 
     def getRelease(self, htmltree):
         if self.noauth:

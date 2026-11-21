@@ -323,17 +323,15 @@ class Parser:
         """
         return getTreeAll(tree, expr)
 
-    def getTreeElementbyExprs(self, tree: html.HtmlElement, expr, expr2=''):
-        """ 多个表达式获取element
+    def getTreeElementbyExprs(self, tree: html.HtmlElement, expr, expr2='', expr3=''):
+        """ 多个表达式获取element（按参数顺序取首个非空结果）
         使用内部的 getTreeElement 防止继承修改后出现问题
         """
         try:
-            first = self.getTreeElement(tree, expr).strip()
-            if first:
-                return first
-            second = self.getTreeElement(tree, expr2).strip()
-            if second:
-                return second
+            for candidate in (expr, expr2, expr3):
+                value = self.getTreeElement(tree, candidate).strip()
+                if value:
+                    return value
             return ''
         except:
             return ''
