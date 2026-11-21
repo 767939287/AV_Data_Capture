@@ -98,7 +98,8 @@ class Javlibrary(Parser):
 
     def search(self, number):
         self.number = number.upper()
-        self.session = request_session(cookies=self.cookies, proxies=self.proxies, verify=self.verify)
+        self.session = request_session(cookies=self.cookies, proxies=self.proxies, verify=self.verify,
+                                       timeout=self.timeout or 20)
         if self.specifiedUrl:
             self.detailurl = self.specifiedUrl
         else:

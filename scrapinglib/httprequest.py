@@ -194,6 +194,19 @@ def _retry_by_solver(url: str, method: str = 'GET', post_data=None,
     return _cf_value(cf, return_type, encoding, request)
 
 
+def get_force_solver(url: str, proxies=None):
+    """ 强制走一次外部 CF 服务取页面（供刮削器在判定 CF 后补救）
+
+    :param url: 目标 URL
+    :param proxies: 本次请求的代理（requests 风格 dict），透传以保证 solver 与直连出口一致
+    :return: (html, final_url)；solver 未启用/失败时返回 ("", "")
+    """
+    cf = _try_cf_bypass(url, 'GET', force=True, proxies=proxies)
+    if cf is None:
+        return "", ""
+    return (cf.html or ""), (getattr(cf, "url", "") or url)
+
+
 
 def _make_cf_response(cf, request=None):
     """ 把 CF 服务结果合成为 requests.Response，供依赖 response 接口的调用方复用
@@ -460,7 +473,8 @@ def get_html_by_form(url, form_select: str = None, fields: dict = None, cookies:
         result = browser.open(url)
         if _absorb_challenge(url, result):
             # 直连被拦：改走 solver；solver 不可用时保持旧行为（下面 result.ok 为 False 则返回 None）
-            retried = _try_cf_bypass(url, 'GET', force=True)
+            # 透传 proxies，保证 solver 与直连走同一出口
+            retried = _try_cf_bypass(url, 'GET', force=True, proxies=proxies)
             if retried is not None:
                 if return_type in ("browser", "scraper"):
                     return _make_cf_response(retried), None
@@ -497,7 +511,8 @@ def get_html_by_scraper(url: str = None, cookies: dict = None, ua: str = None, r
     if timeout is None:
         timeout = G_DEFAULT_TIMEOUT
     # 命中 CF 白名单时优先走外部 CF 服务（javdb 等站点）
-    cf = _try_cf_bypass(url, 'GET')
+    # proxies 必须一并透传：cf_clearance 与出口 IP 绑定，solver 走不同出口会导致复用失效
+    cf = _try_cf_bypass(url, 'GET', proxies=proxies)
     if cf is not None:
         if return_type == "content":
             return (cf.html or "").encode(encoding or "utf-8")
@@ -535,7 +550,8 @@ def get_html_by_scraper(url: str = None, cookies: dict = None, ua: str = None, r
         #     return None
         if _absorb_challenge(url, result):
             # 直连被拦：改走 solver；失败则把原响应交回调用方（保持旧行为）
-            retried = _try_cf_bypass(url, 'GET', force=True)
+            # 同样透传 proxies，避免 solver 与直连出口不一致
+            retried = _try_cf_bypass(url, 'GET', force=True, proxies=proxies)
             if retried is not None:
                 if return_type == "scraper":
                     return _make_cf_response(retried), requests.Session()

@@ -5,7 +5,7 @@ from urllib.parse import urljoin, urlsplit
 from lxml import etree
 
 import config
-from .httprequest import request_session, get_html_by_scraper
+from .httprequest import request_session, get_html_by_scraper, get_force_solver
 from . import tls_request
 from .parser import Parser
 
@@ -303,6 +303,22 @@ class Javdb(Parser):
             return None, url, None
         return (resp.text or ""), (resp.url or url), resp.status_code
 
+    def _fetch_classified(self, url, host):
+        """请求并判定落地页；被 CF 拦截时强制走一次外部 solver 再判定。
+
+        :return: (text, final_url, status, kind)
+        """
+        text, final_url, status = self._fetch(url)
+        kind = self._classify(host, text, final_url, status)
+        if kind != _C_CF:
+            return text, final_url, status, kind
+        # TLS 伪装仍被 CF 拦：走外部 solver（带同一代理出口），仍失败则保留原结果
+        html, cf_url = get_force_solver(url, proxies=self.proxies)
+        if not html:
+            return text, final_url, status, kind
+        cf_final = cf_url or url
+        return html, cf_final, 200, self._classify(host, html, cf_final, 200)
+
     @staticmethod
     def _classify(host, text, final_url, status):
         """判定落地页类型
@@ -397,8 +413,7 @@ class Javdb(Parser):
         diag = []
         for host in self._site_candidates():
             search_url = f"https://{host}/search?q={number}&f=all&locale=zh"
-            text, final_url, status = self._fetch(search_url)
-            kind = self._classify(host, text, final_url, status)
+            text, final_url, status, kind = self._fetch_classified(search_url, host)
             if kind != _C_OK:
                 diag.append((host, kind, final_url, status))
                 continue
@@ -413,8 +428,7 @@ class Javdb(Parser):
             if not matched:
                 diag.append((host, _C_NOMATCH, f"{final_url} (found: {ids[:5]})", status))
                 continue
-            dtext, dfinal, dstatus = self._fetch(detail_url)
-            dkind = self._classify(host, dtext, dfinal, dstatus)
+            dtext, dfinal, dstatus, dkind = self._fetch_classified(detail_url, host)
             if dkind != _C_OK:
                 diag.append((host, f"detail-{dkind}", dfinal, dstatus))
                 continue
@@ -472,8 +486,7 @@ class Javdb(Parser):
                 host = (urlsplit(self.specifiedUrl).hostname or "").lower()
             except Exception:
                 pass
-            text, final_url, status = self._fetch(self.specifiedUrl)
-            kind = self._classify(host, text, final_url, status)
+            text, final_url, status, kind = self._fetch_classified(self.specifiedUrl, host or "")
             if kind != _C_OK:
                 self._print_diag([(host or self.specifiedUrl, kind, final_url, status)])
                 raise Exception(f'[!] {number}: specified url unavailable ({kind})')
