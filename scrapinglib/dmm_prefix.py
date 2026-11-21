@@ -35,7 +35,7 @@ _PREFIX_GROUPS = {
         "hmn", "hnd", "hntd", "ipit", "ipvr", "ipx", "ipzz", "jue", "jufd", "juk",
         "jul", "jux", "juy", "juq", "kawd", "meyd", "miab", "miad", "mibd", "mide",
         "midv", "mifd", "mtsp", "mudr", "mukd", "mvsd", "mymd", "nima", "ofje", "onsd",
-        "pred", "rki", "sone", "sora", "ssis", "ssni", "waaa",
+        "pred", "rki", "soe", "sone", "sora", "ssis", "ssni", "waaa",
     ],
     "1": [
         "dandy", "dism", "dldss", "dvdes", "fcdss", "fset", "fsdss", "gs", "hunt", "kmhrs",

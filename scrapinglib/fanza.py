@@ -51,6 +51,15 @@ class Fanza(Parser):
     def search(self, number):
         self.number = number
         if self.specifiedUrl:
+            # 新版前台（video.dmm.co.jp/av|anime/content/?id=<cid>）是 SPA，
+            # 旧版详情页 xpath 拿不到数据，先抽 cid 走 GraphQL。
+            cid = self._cid_from_video_url(self.specifiedUrl)
+            if cid:
+                content = self._fetch_graphql(cid)
+                if content:
+                    mapped = self._graphql_to_dict(number, cid, content)
+                    if mapped:
+                        return mapped
             self.detailurl = self.specifiedUrl
             durl = "https://www.dmm.co.jp/age_check/=/declared=yes/?"+ urlencode({"rurl": self.detailurl})
             self.htmltree = self.getHtmlTree(durl)
@@ -159,9 +168,22 @@ class Fanza(Parser):
         except Exception:
             return None
 
+    @staticmethod
+    def _cid_from_video_url(url):
+        """从新版前台 URL 中抽出 cid（内容标识）。
+
+        支持 https://video.dmm.co.jp/av/content/?id=soe00579 与
+        https://video.dmm.co.jp/anime/content/?id=xxx 两种形态。
+        非 video.dmm.co.jp 地址返回空串。
+        """
+        if not url or 'video.dmm.co.jp' not in url:
+            return ''
+        m = re.search(r'[?&]id=([0-9a-zA-Z_]+)', url) or re.search(
+            r'/content/([0-9a-zA-Z_]+)', url)
+        return m.group(1) if m else ''
+
     def _search_by_graphql(self, number):
         """走 video.dmm.co.jp 的 GraphQL 取元数据，返回 JSON 字符串；无匹配返回 None。
-
         HTML 前台（/digital/videoa/-/detail/）已 301 到 SPA，旧解析拿不到数据；
         GraphQL 字段与页面一致，且不受前端改版影响。地域限制站点需配置代理。
         """
@@ -514,8 +536,27 @@ class Fanza(Parser):
                 return url
         return ''
 
+    # 新版详情页（amane 参考实现）用 dl/dt/dd 结构：#multi-column / #single-column
+    # 下的 dt 标签不带冒号，值在紧随的 dd[1] 内（span.content-detail__text 或裸文本）。
+    _DD_BASES = ("//*[@id='multi-column']", "//*[@id='single-column']")
+
+    def _dd_nodes(self, expr):
+        """新版 dl/dt/dd 布局：返回标签对应的 dd 节点；取不到返回空列表。"""
+        label = (expr or '').rstrip('：:').strip()
+        if not label:
+            return []
+        for base in self._DD_BASES + ("//dl",):
+            try:
+                nodes = self.htmltree.xpath(
+                    f"{base}//dt[contains(text(),'{label}')]/following-sibling::dd[1]")
+            except Exception:
+                continue
+            if nodes:
+                return nodes
+        return []
+
     def getFanzaString(self, expr):
-        # 同时兼容旧版 <td> 与新版 <th> 布局（参考 MDCx DigitalParser/MonoParser）
+        # 1) 旧版 <td> 与半新版 <th> 布局（参考 MDCx DigitalParser/MonoParser）
         for tag in ("td", "th"):
             result1 = str(self.htmltree.xpath(
                 f"//{tag}[contains(text(),'{expr}')]/following-sibling::td/a/text()")).strip(" ['']")
@@ -524,10 +565,22 @@ class Fanza(Parser):
             combined = result1 + result2
             if combined.strip():
                 return combined
-        return ''
+        # 2) 新版 dl/dt/dd 布局
+        parts = []
+        for dd in self._dd_nodes(expr):
+            try:
+                spans = dd.xpath(".//span[contains(@class,'content-detail__text')]//text()")
+                text = ''.join(t.strip() for t in spans if t and t.strip())
+                if not text:
+                    text = (dd.xpath('string(.)') or '').strip()
+                if text:
+                    parts.append(text)
+            except Exception:
+                continue
+        return ''.join(parts)
 
     def getFanzaStrings(self, string):
-        # 同时兼容旧版 <td> 与新版 <th> 布局（参考 MDCx DigitalParser/MonoParser）
+        # 1) 旧版 <td> 与半新版 <th> 布局（参考 MDCx DigitalParser/MonoParser）
         for tag in ("td", "th"):
             result1 = self.htmltree.xpath(
                 f"//{tag}[contains(text(),'{string}')]/following-sibling::td/a/text()")
@@ -537,4 +590,14 @@ class Fanza(Parser):
                 f"//{tag}[contains(text(),'{string}')]/following-sibling::td/text()")
             if len(result2) > 0:
                 return result2
-        return []
+        # 2) 新版 dl/dt/dd 布局：候选值是 dd 内的 <a> 文本
+        result = []
+        for dd in self._dd_nodes(string):
+            try:
+                for a in dd.xpath(".//a"):
+                    text = (a.text or '').strip()
+                    if text and text not in result:
+                        result.append(text)
+            except Exception:
+                continue
+        return result

@@ -201,6 +201,22 @@ def _thumb_url(item: dict) -> str:
     return ""
 
 
+def _high_res_sample(url: str) -> str:
+    """剧照地址 → 高清地址。
+
+    DMM 剧照高清规则：{cid}-N.jpg → {cid}jp-N.jpg。
+    先去掉缩放查询串再判断，保证幂等（已带 jp- 时不重复加）。
+    """
+    if not url:
+        return ''
+    base = str(url).split('?', 1)[0].split('#', 1)[0]
+    matched = re.search(r"-(\d+)\.jpg$", base, re.IGNORECASE)
+    if not matched:
+        return base
+    stem = base[:matched.start()]
+    return f"{stem}-{matched.group(1)}.jpg" if stem.endswith('jp') else f"{stem}jp-{matched.group(1)}.jpg"
+
+
 def _sample_images(item: dict):
     """取样图 URL 列表（sample_l 优先，已升级到 jp- 高清）。"""
     for key in ("sample_l", "sample_s"):
@@ -208,8 +224,8 @@ def _sample_images(item: dict):
         if isinstance(block, dict):
             imgs = block.get("image", [])
             if imgs:
-                # DMM 剧照高清规则: -N.jpg -> jp-N.jpg
-                return [re.sub(r"-(\d+)\.jpg", r"jp-\1.jpg", u) for u in imgs]
+                # DMM 剧照高清规则: -N.jpg -> jp-N.jpg（去查询串、幂等）
+                return [_high_res_sample(u) for u in imgs if u]
     return []
 
 

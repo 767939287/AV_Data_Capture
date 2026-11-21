@@ -257,9 +257,13 @@ def upgrade_poster(url: str, proxies=None, verify=None) -> str:
 
 # DMM 详情页 URL 中以 cid= 携带真实站内编号（如 ssis00200 / h_1240milk00123）
 _CID_RE = re.compile(r"cid=([0-9a-zA-Z_]+)", re.IGNORECASE)
-# DMM 搜索结果中详情页链接的通用形态
-_DETAIL_HREF_RE = re.compile(r"/(?:digital|mono|rental|prime|monthly|anime)/[^\"'#?]*/-/detail/=/cid=([0-9a-zA-Z_]+)",
-                             re.IGNORECASE)
+# DMM 搜索结果中详情页链接的通用形态（捕获类目 + cid，用于按类目优先级择优）
+_DETAIL_HREF_RE = re.compile(
+    r"/(digital|mono|rental|prime|monthly|anime)/[^\"'#?]*/-/detail/=/cid=([0-9a-zA-Z_]+)",
+    re.IGNORECASE)
+# 类目优先级（参考 amane/mdcz）：数字柜优先，租赁最后
+_CATEGORY_RANK = {"digital": 100, "anime": 100, "mono": 60,
+                  "prime": 50, "monthly": 40, "rental": 30}
 
 
 def _normalize_number(number: str) -> str:
@@ -335,7 +339,7 @@ def get_dmm_cid_ex(number: str, proxies=None, verify=None):
 
     problems = []
     for s_num in search_numbers:
-        url = "https://www.dmm.co.jp/search/=/searchstr=" + quote(s_num) + "/"
+        url = "https://www.dmm.co.jp/search/=/searchstr=" + quote(s_num) + "/sort=ranking/"
         try:
             html = httprequest.get(url, retry=1, timeout=12,
                                    proxies=proxies, verify=verify)
@@ -346,11 +350,14 @@ def get_dmm_cid_ex(number: str, proxies=None, verify=None):
             problems.append("搜索页无响应/404")
             continue
         # 从 HTML 中直接提取详情页 cid（比 xpath 更稳，覆盖脚本内嵌链接）
-        cids = _DETAIL_HREF_RE.findall(html)
-        if not cids:
+        pairs = _DETAIL_HREF_RE.findall(html)
+        if pairs:
+            # 按类目优先级稳定排序（同优先级保持原出现顺序），再取 cid
+            pairs = sorted(pairs, key=lambda p: -_CATEGORY_RANK.get(str(p[0]).lower(), 0))
+            cids = _dedupe([cid for _category, cid in pairs if cid])
+        else:
             # 兜底：任意 cid= 形态
-            cids = _CID_RE.findall(html)
-        cids = _dedupe([c for c in cids if c])
+            cids = _dedupe([c for c in _CID_RE.findall(html) if c])
         if not cids:
             problems.append("搜索页未解析到 cid")
             continue
