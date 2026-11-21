@@ -115,9 +115,11 @@ def _valid(url, proxies, verify, min_width):
         return False
 
 
-def fetch_cover(number, proxies=None, verify=None):
+def fetch_cover(number, proxies=None, verify=None, exclude=None):
     """按配置顺序取封面。
 
+    :param exclude: 已知不可用的封面地址集合（如下载阶段刚失败的那个），
+                    命中即跳过，避免「换源」换回同一个坏地址。
     :return: (url, used_source, reasons)
         url 为空表示全部失败（调用方保留原封面）；
         reasons 为各源失败原因，便于 debug 日志排查。
@@ -126,6 +128,7 @@ def fetch_cover(number, proxies=None, verify=None):
     sources = _split(conf.cover_source_sources())
     if not sources or not number:
         return '', '', []
+    skip_urls = {u for u in (exclude or ()) if u}
     watermark = set(_split(conf.cover_source_watermark_sources()))
     allow_watermark = conf.cover_source_allow_watermark()
     min_width = conf.cover_source_min_width()
@@ -147,6 +150,9 @@ def fetch_cover(number, proxies=None, verify=None):
             url, why = '', f'异常({type(e).__name__})'
         if not url:
             reasons.append(f'{name}: {why or "未取到"}')
+            continue
+        if url in skip_urls:
+            reasons.append(f'{name}: 与已失败地址相同，跳过')
             continue
         if name not in _PRE_VERIFIED and not _valid(url, proxies, verify, min_width):
             reasons.append(f'{name}: 校验未通过')

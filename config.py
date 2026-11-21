@@ -870,6 +870,19 @@ class Config:
         except Exception:
             return self.debug()
 
+    def cover_source_fallback_on_download_fail(self) -> bool:
+        """下载阶段封面失败时自动换备用源（[cover_source] fallback_on_download_fail）。
+
+        0=关闭（默认，行为与升级前一致）：下载失败只按原逻辑重试同一地址；
+        1=开启：封面下载后校验发现不是有效图片（如站点返回 139 字节错误页），
+          会向 [cover_source] sources 再取一个不同的封面地址重试一次。
+        与 switch 相互独立：switch 控制「刮削阶段主动换源」，本项控制「下载阶段兜底换源」。
+        """
+        try:
+            return self.conf.getboolean("cover_source", "fallback_on_download_fail", fallback=False)
+        except Exception:
+            return False
+
     def cloudflare(self) -> "CloudflareConf":
         """ 读取 [cloudflare] 段配置（外部 Cloudflare 挑战绕过服务）
 

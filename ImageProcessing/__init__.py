@@ -8,7 +8,7 @@ import importlib
 from pathlib import Path
 from PIL import Image
 import shutil
-from ADC_function import file_not_exist_or_empty
+from ADC_function import file_not_exist_or_empty, is_valid_image_file
 
 
 def _face_models():
@@ -79,14 +79,16 @@ def cutImage(imagecut, path, thumb_path, poster_path, skip_facerec=False):
         # 只对"本来不裁剪"的源强制裁剪，不覆盖各站自带的人像裁剪设定(imagecut=4)
         if imagecut == 0:
             imagecut = 1
-    elif conf.download_only_missing_images() and not file_not_exist_or_empty(fullpath_poster):
+    elif (conf.download_only_missing_images()
+          and not file_not_exist_or_empty(fullpath_poster)
+          and is_valid_image_file(fullpath_poster)):
         return
     # imagecut为4时同时也是有码影片 也用人脸识别裁剪封面
     if imagecut == 1 or imagecut == 4:  # 剪裁大封面
-        if file_not_exist_or_empty(fullpath_fanart):
-            # 封面缺失或为 0 字节（下载失败残留）：跳过裁剪，避免 Pillow 抛
-            # 'cannot identify image file'，日志里只留一条可读提示。
-            print(f'[-]Cover cut skipped: {Path(fullpath_fanart).name} missing or empty')
+        if file_not_exist_or_empty(fullpath_fanart) or not is_valid_image_file(fullpath_fanart):
+            # 封面缺失、0 字节、或下载到的是错误页（如 139 字节反爬 token）：
+            # 跳过裁剪，避免 Pillow 抛 'cannot identify image file'。
+            print(f'[-]Cover cut skipped: {Path(fullpath_fanart).name} missing or invalid')
             return
         try:
             img = Image.open(fullpath_fanart)
@@ -120,6 +122,9 @@ def cutImage(imagecut, path, thumb_path, poster_path, skip_facerec=False):
             print(e)
             print('[-]Cover cut failed!')
     elif imagecut == 0:  # 复制封面
+        if not is_valid_image_file(fullpath_fanart):
+            print(f'[-]Cover copy skipped: {Path(fullpath_fanart).name} invalid')
+            return
         shutil.copyfile(fullpath_fanart, fullpath_poster)
         print(f"[+]Image Copyed!     {Path(fullpath_poster).name}")
 

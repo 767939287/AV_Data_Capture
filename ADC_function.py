@@ -483,6 +483,35 @@ def normalize_image_file(filepath) -> bool:
         return False
 
 
+def is_image_filename(filepath) -> bool:
+    """按扩展名判断该文件是否应当是图片（.jpg/.png/.webp 等）。"""
+    try:
+        return Path(str(filepath)).suffix.lower() in IMAGE_FORMAT_BY_EXT
+    except Exception:
+        return False
+
+
+def is_valid_image_file(filepath, min_bytes: int = 64) -> bool:
+    """判断已写盘的图片是否真能被解码（防「错误页被当成图片」）。
+
+    站点维护、防盗链、Cloudflare 拦截时常返回一段几十字节的随机二进制
+    （实测 javbus 返回 139B，file 只识别为 data）。下载层原实现只判断
+    「响应是否为空」，这类内容会被原样写成 .jpg，媒体服务器打开即为破图。
+    这里以「Pillow 能否解码」为唯一标准：HTML/JSON/加密 token/截断图/0 字节
+    全部判为无效；webp 存成 .jpg 但内容完好的，仍算有效（normalize 会转格式）。
+    """
+    try:
+        fullpath = Path(str(filepath))
+        if not fullpath.is_file() or fullpath.stat().st_size < min_bytes:
+            return False
+        from PIL import Image
+        with Image.open(fullpath) as img:
+            img.verify()
+        return True
+    except Exception:
+        return False
+
+
 def is_japanese(raw: str) -> bool:
     """
     日语简单检测

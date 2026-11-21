@@ -155,12 +155,25 @@ def get_info(json_data):  # 返回json里的数据
 
 def small_cover_check(path, filename, cover_small, movie_path, json_headers=None):
     full_filepath = Path(path) / filename
-    if config.getInstance().download_only_missing_images() and not file_not_exist_or_empty(str(full_filepath)):
+    if (config.getInstance().download_only_missing_images()
+            and not file_not_exist_or_empty(str(full_filepath))
+            and is_valid_image_file(str(full_filepath))):
+        return
+    if not cover_small:
         return
     if json_headers != None:
         download_file_with_filename(cover_small, filename, path, movie_path, json_headers['headers'])
     else:
         download_file_with_filename(cover_small, filename, path, movie_path)
+    # 站点抽风时可能返回几十字节的错误页，不能当图片留在盘上
+    if not is_valid_image_file(str(full_filepath)):
+        print(f'[-]Small cover ignored: not a valid image {full_filepath.name}')
+        try:
+            if full_filepath.is_file():
+                os.remove(str(full_filepath))
+        except OSError:
+            pass
+        return
     print('[+]Image Downloaded! ' + full_filepath.name)
 
 
@@ -199,7 +212,7 @@ def create_folder(json_data):  # 创建文件夹
 # =====================资源下载部分===========================
 
 # path = examle:photo , video.in the Project Folder!
-def download_file_with_filename(url, filename, path, filepath, json_headers=None):
+def download_file_with_filename(url, filename, path, filepath, json_headers=None, move_on_fail=True):
     """
     Downloads a file from the given URL and saves it with the specified filename in the provided path.
     Args:
@@ -208,6 +221,8 @@ def download_file_with_filename(url, filename, path, filepath, json_headers=None
         path (str): The path where the downloaded file should be saved.
         filepath (str): The full filepath of the current script.
         json_headers (dict, optional): Additional headers to include in the request. Defaults to None.
+        move_on_fail (bool): 彻底失败时是否把影片移入 failed 文件夹。
+            封面下载走换源兜底时应传 False（还没试完备用源，不能先搬影片）。
     Returns:
         None
     """
@@ -244,7 +259,8 @@ def download_file_with_filename(url, filename, path, filepath, json_headers=None
         except Exception as e:
             print('[-]Image Download :Error', e)
     print('[-]Connect Failed! Please check your Proxy or Network!')
-    moveFailedFolder(filepath)
+    if move_on_fail:
+        moveFailedFolder(filepath)
     return
 
 
@@ -382,42 +398,113 @@ def image_ext(url):
 
 
 # 封面是否下载成功，否则移动到failed
-def image_download(cover, fanart_path, thumb_path, path, filepath, json_headers=None):
-    full_filepath = os.path.join(path, thumb_path)
-    if config.getInstance().download_only_missing_images() and not file_not_exist_or_empty(full_filepath):
-        return
-    if json_headers != None:
-        if download_file_with_filename(cover, thumb_path, path, filepath, json_headers['headers']) == 'failed':
-            moveFailedFolder(filepath)
-            return
-    else:
-        if download_file_with_filename(cover, thumb_path, path, filepath) == 'failed':
-            moveFailedFolder(filepath)
-            return
+def _image_download_once(url, filename, path, filepath, headers=None):
+    """下载一张图片并校验内容是否真是图片；返回是否成功。无效文件会被删除。
 
-    configProxy = config.getInstance().proxy()
-    for i in range(configProxy.retry):
-        if file_not_exist_or_empty(full_filepath):
-            print('[!]Image Download Failed! Trying again. [{}/3]', i + 1)
-            if json_headers != None:
-                download_file_with_filename(cover, thumb_path, path, filepath, json_headers['headers'])
-            else:
-                download_file_with_filename(cover, thumb_path, path, filepath)
-            continue
-        else:
-            break
-    if file_not_exist_or_empty(full_filepath):
-        # 下载失败：清掉残留的 0 字节文件，避免后续裁剪/水印报错，
-        # 也避免下次被 download_only_missing_images 当成「已有图片」复用。
+    站点维护/防盗链/Cloudflare 拦截时可能返回几十字节的随机二进制（实测 139B），
+    只判「响应非空」会把它们当图片存下来，媒体服务器打开即为破图。
+    """
+    # 仍在换源流程中，不应因为单个地址失败就把影片搬进 failed
+    if headers is not None:
+        download_file_with_filename(url, filename, path, filepath, headers, move_on_fail=False)
+    else:
+        download_file_with_filename(url, filename, path, filepath, move_on_fail=False)
+    full = os.path.join(path, filename)
+    if file_not_exist_or_empty(full):
+        return False
+    if is_image_filename(full) and not is_valid_image_file(full):
         try:
-            if os.path.isfile(full_filepath) and os.path.getsize(full_filepath) == 0:
-                os.remove(full_filepath)
+            size = os.path.getsize(full)
+        except OSError:
+            size = 0
+        print(f'[-]Image ignored: not a valid image ({size}B) {url}')
+        try:
+            os.remove(full)
         except OSError:
             pass
+        return False
+    return True
+
+
+def _fallback_cover_url(number, tried):
+    """下载阶段兜底换源：向 [cover_source] 取一个不在 tried 里的封面地址。"""
+    if not number:
+        return ''
+    try:
+        from scrapinglib import cover_source
+        conf = config.getInstance()
+        try:
+            proxies = conf.proxy().proxies() or None
+        except Exception:
+            proxies = None
+        try:
+            verify = conf.cacert_file() or None
+        except Exception:
+            verify = None
+        url, used, reasons = cover_source.fetch_cover(
+            number, proxies=proxies, verify=verify, exclude=tried)
+        if url:
+            print(f'[+]Cover fallback hit: {used} -> {url}')
+            return url
+        if conf.cover_source_debug():
+            print(f'[-]Cover fallback failed for {number}: ' + '；'.join(reasons[:6]))
+    except Exception as e:
+        print(f'[-]Cover fallback skipped: {e}')
+    return ''
+
+
+def image_download(cover, fanart_path, thumb_path, path, filepath, json_headers=None, number=None):
+    conf = config.getInstance()
+    full_filepath = os.path.join(path, thumb_path)
+    if (conf.download_only_missing_images()
+            and not file_not_exist_or_empty(full_filepath)
+            and is_valid_image_file(full_filepath)):
+        return
+    # 已存在的坏图（如 139 字节反爬 token）先删掉，否则会被当成「已下载」永久复用
+    if os.path.isfile(full_filepath) and not is_valid_image_file(full_filepath):
+        print(f'[-]Removing invalid existing image: {Path(full_filepath).name}')
+        try:
+            os.remove(full_filepath)
+        except OSError:
+            pass
+
+    headers = json_headers['headers'] if json_headers else None
+    retry = 1
+    try:
+        retry += max(0, int(conf.proxy().retry))
+    except Exception:
+        retry += 3
+
+    def _try(url):
+        """对同一地址重试 retry 次，成功即返回 True。"""
+        for i in range(retry):
+            if _image_download_once(url, thumb_path, path, filepath, headers):
+                return True
+            if i + 1 < retry:
+                print(f'[!]Image Download Failed! Trying again. [{i + 1}/{retry}]')
+        return False
+
+    url = cover
+    tried = [url] if url else []
+    ok = _try(url) if url else False
+    # 失败后按开关决定是否换备用源（每次换一个不同的地址，避免死循环）
+    while not ok and conf.cover_source_fallback_on_download_fail():
+        new_url = _fallback_cover_url(number, tried)
+        if not new_url or new_url in tried:
+            break
+        print(f'[!]Cover download failed, switching source: {url} -> {new_url}')
+        tried.append(new_url)
+        url = new_url
+        ok = _try(url)
+
+    if not ok:
         return
     print('[+]Image Downloaded!', Path(full_filepath).name)
-    if not config.getInstance().jellyfin():
-        shutil.copyfile(full_filepath, os.path.join(path, fanart_path))
+    if not conf.jellyfin():
+        try:
+            shutil.copyfile(full_filepath, os.path.join(path, fanart_path))
+        except Exception:
+            pass
 
 
 def print_files(path, leak_word, c_word, naming_rule, part, cn_sub, json_data, filepath, tag, actor_list, liuchu,
@@ -1088,9 +1175,9 @@ def core_main(movie_path, number_th, oCC, specified_source=None, specified_url=N
 
         # creatFolder会返回番号路径
         if 'headers' in json_data:
-            image_download(cover, fanart_path, thumb_path, path, movie_path, json_data)
+            image_download(cover, fanart_path, thumb_path, path, movie_path, json_data, number=number)
         else:
-            image_download(cover, fanart_path, thumb_path, path, movie_path)
+            image_download(cover, fanart_path, thumb_path, path, movie_path, number=number)
 
         if not multi_part or part.lower() == '-cd1':
             try:
@@ -1157,9 +1244,9 @@ def core_main(movie_path, number_th, oCC, specified_source=None, specified_url=N
 
         # creatFolder会返回番号路径
         if 'headers' in json_data:
-            image_download(cover, fanart_path, thumb_path, path, movie_path, json_data)
+            image_download(cover, fanart_path, thumb_path, path, movie_path, json_data, number=number)
         else:
-            image_download(cover, fanart_path, thumb_path, path, movie_path)
+            image_download(cover, fanart_path, thumb_path, path, movie_path, number=number)
 
         
 
