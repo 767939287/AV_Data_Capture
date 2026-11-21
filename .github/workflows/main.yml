@@ -15,6 +15,10 @@ on:
         description: '要构建的分支（留空则使用界面上 "Use workflow from" 所选分支）'
         required: false
         default: ''
+      run_smoke_test:
+        description: '构建后运行联网冒烟测试（较慢，失败不阻塞构建）'
+        required: false
+        default: 'true'
   release:
     types: [published]
 
@@ -56,13 +60,19 @@ jobs:
         with:
           python-version: '3.12'
 
+      # 用 uv 安装依赖：解析/下载比 pip 快数倍，enable-cache 会缓存已下载的 wheel
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: 'requirements.txt'
+
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install face_recognition --no-deps
+          uv pip install --system -r requirements.txt
+          uv pip install --system face_recognition --no-deps
           # PyInstaller 6.x 才完整支持 Python 3.12（含 --python-option）
-          pip install "pyinstaller>=6.10"
+          uv pip install --system "pyinstaller>=6.10"
 
       - name: Test number_perser.get_number
         run: |
@@ -133,7 +143,9 @@ jobs:
           Compress-Archive -Path dist/* -DestinationPath "MDC-$env:VERSION-$env:RUNNER_OS-amd64.zip" -Force
 
       - name: Run test (Ubuntu & MacOS)
-        if: matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest'  || matrix.os == 'ubuntu-22.04'  || matrix.os == 'ubuntu-20.04'
+        # 冒烟测试会真实联网刮削，改为可选且失败不阻塞构建
+        if: "(matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-20.04') && (github.event_name == 'release' || github.event.inputs.run_smoke_test != 'false')"
+        continue-on-error: true
         run: |
           cd dist
           touch YMDD-405.mp4
@@ -143,7 +155,8 @@ jobs:
           ./Movie_Data_Capture -a
 
       - name: Run test (Windows)
-        if: matrix.os == 'windows-latest'
+        if: "matrix.os == 'windows-latest' && (github.event_name == 'release' || github.event.inputs.run_smoke_test != 'false')"
+        continue-on-error: true
         shell: pwsh
         run: |
           # 控制台代码页切到 UTF-8，避免程序输出的中文被按 cp1252 解码/编码
