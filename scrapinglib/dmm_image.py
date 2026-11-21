@@ -71,22 +71,51 @@ def _with_https(url: str) -> str:
     return url
 
 
+_PICS_HOST = "pics.dmm.co.jp"
+_AWS_HOST = "awsimgsrc.dmm.co.jp/pics_dig"
+# aws 上有副本的路径前缀（参考 amane dmm_cdn.py）；其余分类（如 digital/anime、
+# e-book 等）没有高清副本，直接放弃，避免构造出必然 404 的地址。
+_DIGITAL_HR_PREFIXES = ("digital/video/", "digital/amateur/")
+_MONO_PREFIX = "mono/movie/"
+
+
+def _canonical_mono_path(rel_path: str) -> str:
+    """mono 路径去掉 cid 前多出的分类目录（adult / amateur / japanese）。
+
+    例：mono/movie/adult/118abf295/118abf295pl.jpg -> mono/movie/118abf295/118abf295pl.jpg
+    """
+    segments = rel_path[len(_MONO_PREFIX):].split("/")
+    if len(segments) > 2:
+        return f"{_MONO_PREFIX}{'/'.join(segments[-2:])}"
+    return rel_path
+
+
 def _to_aws_hd(url: str) -> str:
     """pics.dmm.co.jp 低清图 -> awsimgsrc.dmm.co.jp/pics_dig 高清图。
 
-    已是 awsimgsrc 域名或非 pics.dmm 域名时返回空串（表示无需/无法升级）。
+    只对 aws 上有副本的分类生效（digital/video、digital/amateur、mono/movie），
+    其余分类以及非 pics.dmm 域名返回空串（表示无需/无法升级）。
     """
-    normalized = _with_https(url)
-    if "pics.dmm.co.jp" not in normalized:
+    normalized = _strip_query(_with_https(url))
+    marker = _PICS_HOST + "/"
+    idx = normalized.find(marker)
+    if idx < 0:
         return ""
-    return normalized.replace(
-        "pics.dmm.co.jp", "awsimgsrc.dmm.co.jp/pics_dig"
-    ).replace("/adult/", "/")
+    rel_path = normalized[idx + len(marker):]
+    if not rel_path:
+        return ""
+    if rel_path.startswith(_MONO_PREFIX):
+        if len(rel_path[len(_MONO_PREFIX):].split("/")) < 2:
+            return ""
+        rel_path = _canonical_mono_path(rel_path)
+    elif not rel_path.startswith(_DIGITAL_HR_PREFIXES):
+        return ""
+    return f"https://{_AWS_HOST}/{rel_path}"
 
 
 def _strip_query(url: str) -> str:
-    """去掉 URL 的查询串，避免 ?v=... 之类参数干扰后缀判断。"""
-    return url.split("?", 1)[0]
+    """去掉 URL 的查询串与锚点，避免 ?v=... 之类参数干扰后缀判断。"""
+    return url.split("?", 1)[0].split("#", 1)[0]
 
 
 def _to_landscape(url: str) -> str:
@@ -147,11 +176,13 @@ def _parse_image_size(data: bytes):
     return 0, 0
 
 
-def _probe_image(url: str, proxies=None, verify=None, check_hd: bool = False) -> str:
+def _probe_image(url: str, proxies=None, verify=None, check_hd: bool = False,
+                 min_width: int = None) -> str:
     """校验图片是否存在且有效，返回空串表示有效，否则返回简短的失败原因。
 
     DMM 对不存在的图通常返回 404；此处同时过滤 Content-Type 非图片、
-    以及体积极小的占位图（<4KB）；check_hd=True 时还要求宽度 >= 700。
+    以及体积极小的占位图（<4KB）；check_hd=True 时还要求宽度达标。
+    min_width 为 None 时用默认阈值 700，<=0 表示不校验分辨率。
     """
     try:
         resp = httprequest.get(url, return_type="object", retry=1, timeout=8,
@@ -167,12 +198,14 @@ def _probe_image(url: str, proxies=None, verify=None, check_hd: bool = False) ->
         if length is not None and str(length).isdigit() and int(length) < 4096:
             return f"文件过小({length}B)"
         if check_hd:
+            limit = _DMM_HD_MIN_WIDTH if min_width is None else int(min_width)
             # 读取前若干字节解析分辨率（JPEG 的 SOF 段通常在前几 KB 内）
-            data = httprequest.get(url, return_type="content", retry=1, timeout=8,
-                                   proxies=proxies, verify=verify)
-            width, _height = _parse_image_size(data or b"")
-            if width and width < _DMM_HD_MIN_WIDTH:
-                return f"分辨率不足(宽{width}<{_DMM_HD_MIN_WIDTH})"
+            if limit > 0:
+                data = httprequest.get(url, return_type="content", retry=1, timeout=8,
+                                       proxies=proxies, verify=verify)
+                width, _height = _parse_image_size(data or b"")
+                if width and width < limit:
+                    return f"分辨率不足(宽{width}<{limit})"
         return ""
     except Exception as e:
         return f"请求异常({type(e).__name__})"

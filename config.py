@@ -825,6 +825,51 @@ class Config:
         except Exception:
             return False
 
+    # ---------------- 封面跨源回退（[cover_source]） ----------------
+    def cover_source_switch(self) -> bool:
+        """封面跨源回退总开关（[cover_source] switch）；默认 0 关闭，零副作用。"""
+        try:
+            return self.conf.getboolean("cover_source", "switch", fallback=False)
+        except Exception:
+            return False
+
+    def cover_source_sources(self) -> str:
+        """备选源顺序（逗号分隔，从左到右优先）；缺失/为空返回空串。"""
+        try:
+            return (self.conf.get("cover_source", "sources", fallback="") or "").strip()
+        except Exception:
+            return ""
+
+    def cover_source_watermark_sources(self) -> str:
+        """已知带水印的源（逗号分隔）；allow_watermark=0 时直接跳过。"""
+        try:
+            return (self.conf.get("cover_source", "watermark_sources", fallback="") or "").strip()
+        except Exception:
+            return ""
+
+    def cover_source_allow_watermark(self) -> bool:
+        """是否接受带水印源的封面（默认 0=不接受，保持干净封面优先）。"""
+        try:
+            return self.conf.getboolean("cover_source", "allow_watermark", fallback=False)
+        except Exception:
+            return False
+
+    def cover_source_min_width(self) -> int:
+        """封面最小宽度（像素）；<=0 表示不校验。默认 700。"""
+        try:
+            return int(self.conf.get("cover_source", "min_width", fallback="700"))
+        except Exception:
+            return 700
+
+    def cover_source_debug(self) -> bool:
+        """跨源封面日志开关；未配置时跟随 [debug_mode] switch。"""
+        try:
+            if not self.conf.has_option("cover_source", "debug"):
+                return self.debug()
+            return self.conf.getboolean("cover_source", "debug")
+        except Exception:
+            return self.debug()
+
     def cloudflare(self) -> "CloudflareConf":
         """ 读取 [cloudflare] 段配置（外部 Cloudflare 挑战绕过服务）
 
@@ -1445,6 +1490,15 @@ class Config:
         conf.set(sec21, "cumulative", "0")
         conf.set(sec21, "cumulative_target", "0")
         conf.set(sec21, "cumulative_progress", "1")
+
+        sec22 = "cover_source"
+        conf.add_section(sec22)
+        conf.set(sec22, "switch", "0")
+        conf.set(sec22, "sources", "dmm,javbus,mgstage,javdb")
+        conf.set(sec22, "watermark_sources", "javdb")
+        conf.set(sec22, "allow_watermark", "0")
+        conf.set(sec22, "min_width", "700")
+        conf.set(sec22, "debug", "0")
 
         return conf
 

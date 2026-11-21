@@ -425,6 +425,30 @@ def get_data_from_json(
             print(f'[-]DMM image upgrade skipped: {e}')
     # ==================== DMM/FANZA 高清图升级 END ====================
 
+    # ==================== 封面跨源回退（[cover_source]） ====================
+    # 按配置顺序向其它站点取封面（默认关闭）。已知带水印的源默认不接受，
+    # 只有 allow_watermark=1 时才作为最后的兜底。失败一律保留当前封面。
+    # 与上面的 [dmm_image] 相互独立：两者都开时 dmm 会被尝试两次（第二次命中代价很小）。
+    try:
+        if conf.cover_source_switch():
+            from scrapinglib import cover_source
+            cover_url, used_source, cover_reasons = cover_source.fetch_cover(
+                number, proxies=proxies, verify=ca_cert)
+            if cover_url and cover_url != json_data.get('cover'):
+                old_cover = json_data.get('cover')
+                json_data['cover'] = cover_url
+                if conf.cover_source_debug():
+                    print(f'[+]Cover source for {number} by {used_source}: '
+                          f'{old_cover} -> {cover_url}')
+            elif conf.cover_source_debug():
+                print(f'[-]Cover source not found for {number}: '
+                      + '；'.join(cover_reasons[:6]))
+    except Exception as e:
+        # 跨源取图失败一律吞掉，保留当前封面
+        if conf.cover_source_debug():
+            print(f'[-]Cover source skipped: {e}')
+    # ==================== 封面跨源回退 END ====================
+
     return json_data
 
 
