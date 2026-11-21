@@ -44,6 +44,7 @@ import json
 import config
 
 from . import httprequest
+from .utils import html_to_text
 
 
 # 默认 API 凭据（来自 MDCx 的公开测试凭据；可在 config.ini 用 [dmm_api] 覆盖）
@@ -394,7 +395,8 @@ def _graphql_to_dict(number: str, cid: str, content: dict) -> dict:
             samples.append(url)
     runtime = content.get("duration")
     release = (content.get("deliveryStartDate") or "")[:10]
-    description = re.sub(r"<[^>]+>", "", content.get("description") or "").strip()
+    # description 是 HTML，段落靠 <br>/<br><br> 分隔；直接剃标签会把换行一并弄丢
+    description = html_to_text(content.get("description") or "")
     directors = [d.get("name") for d in content.get("directors") or [] if d.get("name")]
     return {
         "number": number,

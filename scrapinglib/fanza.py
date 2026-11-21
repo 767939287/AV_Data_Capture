@@ -8,6 +8,7 @@ from lxml import etree
 from urllib.parse import urlencode
 from . import httprequest
 from .parser import Parser
+from .utils import html_to_text
 
 # DMM/FANZA 新前台（video.dmm.co.jp）是 SPA，HTML 里没有影片数据，元数据改由 GraphQL 提供。
 # 该接口对部分地区开放，直连会命中地域限制，需由调用方配置代理。
@@ -238,7 +239,8 @@ class Fanza(Parser):
                 samples.append(url)
         runtime = content.get('duration')
         release = (content.get('deliveryStartDate') or '')[:10]
-        description = re.sub(r'<[^>]+>', '', content.get('description') or '').strip()
+        # description 是 HTML，段落靠 <br>/<br><br> 分隔；直接剃标签会把换行一并弄丢
+        description = html_to_text(content.get('description') or '')
         directors = [d.get('name') for d in content.get('directors') or [] if d.get('name')]
         movie = (content.get('sample2DMovie') or {}).get('highestMovieUrl') or ''
         dic = {
