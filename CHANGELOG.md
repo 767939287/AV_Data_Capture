@@ -1,9 +1,18 @@
 # 更新日志
 
-## [未发布]
+## [6.70] - 2026-11-20
 
 ### 新增
 
+- **新增 7MMTV 刮削器（`7mmtv`）**
+  - 覆盖有码原版 / 中文字幕 / 無碼破解三类页面，同番号同时命中时按
+    `censored_content` → `chinese_content` → `reducing-mosaic_content` 择优，
+    可用 `-ss`/`--specified-url` 指定具体页面。
+  - 直连可访问（实测 200，无需 Cloudflare solver）。
+  - 已加入 `adult_full_sources` 与 storyline 中文简介站点；详情页无简介时
+    自动回退 storyline 多源抓取（带防递归保护）。
+  - `config.ini` 的 `[storyline]` 站点列表末尾加入 `7mmtv`；
+    `py_to_exe.ps1` 补充 `scrapinglib.7mmtv` 的 hidden-import。
 - **`[common] success_list_path` —— 成功列表（纯输出）**
   - **留空（默认）= 不启用**：不生成任何文件，也不影响刮削流程；
     与 `failed_list_path` / `unrecognized_list_path` 不同，**没有**回退到失败目录的默认路径。
@@ -22,6 +31,23 @@
   - `0`：以上 `[CF]` 日志全部静默，**即使 `[debug_mode] switch = 1` 也不会打印**。
   - 未配置该键时跟随 `[debug_mode] switch`，老配置文件行为不变。
   - 该开关只影响 `[CF]` 相关输出，其余 debug 日志不受影响（`config.CloudflareConf.debug`）。
+
+### 修复
+
+- 移除 `ImageProcessing/baidu-v3.py` 中硬编码的百度云 API 凭据。
+- `scrapinglib/madou.py`：`change_number()` 未命中规则时返回三元组，修复解包崩溃。
+- `scrapinglib/dlsite.py`：`getExtrafanart` 补传 `htmltree`；检索四轮为空时返回 404。
+- `xlog.py`：`log()` 在 `buffer_size>0` 时引用未定义变量 `string`。
+- `scrapinglib/avsox.py`：封面与小封面（`posterLarge`/`posterSmall`）颠倒。
+- `scrapinglib/tmdb.py`：绝对 `og:image` 被重复拼接站点前缀。
+- `docker/docker-compose.yaml`：入口文件名改为 `Movie_Data_Capture.py`。
+- `pissplay` / `jav321` / `gcolle` / `iqqtv` / `javmenu`：索引越界、XPath 缺 `@`、
+  时长标签多余分号等。
+- `getchu` / `fc2`：`eval()` 改为直接调用 / `json.loads`。
+- `scrapinglib/parser.py`：`getHtml` 对非字符串响应（`return_type='object'`）做 404 判断保护。
+- `subtitles`：所有请求补充超时；`requirements.txt` 补 `face-recognition`、去重复项。
+- `Makefile` / `wrapper/*.sh`：打包补 `ImageProcessing/models`、修正 `--hidden-import` 写法。
+- `scrapinglib/QueryError.py`：补充 `message` 属性；`storyline`/`number_parser` 边界与拼写修正。
 
 ## [6.6.9] - 2026-11-08
 
